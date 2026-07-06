@@ -1,0 +1,11 @@
+{
+  "name": "couple-life-miniapp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/**/*.test.js"
+  },
+  "dependencies": {
+    "uview-ui": "^2.0.38"
+  }
+}

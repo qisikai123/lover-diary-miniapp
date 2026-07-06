@@ -1,0 +1,15 @@
+{
+  "name": "情侣生活记录",
+  "appid": "wx4fc1cc5694898a0b",
+  "description": "情侣生活记录微信小程序",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "wx4fc1cc5694898a0b",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  }
+}

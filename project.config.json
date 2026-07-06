@@ -1,0 +1,17 @@
+{
+  "appid": "wx4fc1cc5694898a0b",
+  "projectname": "lover-diary-miniapp",
+  "description": "情侣生活记录微信小程序",
+  "miniprogramRoot": "unpackage/dist/dev/mp-weixin/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "compileType": "miniprogram",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "enhance": true
+  },
+  "libVersion": "latest",
+  "condition": {}
+}

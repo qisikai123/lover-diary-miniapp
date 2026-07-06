@@ -1,0 +1,24 @@
+{
+  "easycom": {
+    "^u-(.*)": "uview-ui/components/u-$1/u-$1.vue"
+  },
+  "pages": [
+    {
+      "path": "pages/record-list/index",
+      "style": {
+        "navigationBarTitleText": "记录列表"
+      }
+    },
+    {
+      "path": "pages/record-editor/index",
+      "style": {
+        "navigationBarTitleText": "记录生活"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "#f6f2ea",
+    "backgroundColor": "#f6f2ea"
+  }
+}

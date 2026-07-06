@@ -1,0 +1,11 @@
+node_modules/
+unpackage/
+
+.DS_Store
+*.log
+
+dist/
+coverage/
+
+project.private.config.json
+
