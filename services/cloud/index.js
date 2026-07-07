@@ -35,7 +35,13 @@ function callCloudFunction(name, action, payload) {
 
   // 微信云开发是当前项目后端，优先走微信小程序运行时的 `wx.cloud`。
   if (typeof wx !== 'undefined' && wx.cloud) {
-    return wx.cloud.callFunction(options).then((response) => response.result);
+    return wx.cloud.callFunction(options).then((response) => response.result).catch((error) => {
+      if (isMissingCloudFunctionError(error)) {
+        throw new Error(`云函数 ${name} 未上传或未部署，请在微信开发者工具中上传部署后重试`);
+      }
+
+      throw error;
+    });
   }
 
   return Promise.reject(new Error('当前运行环境不支持微信云开发调用'));
@@ -45,3 +51,9 @@ module.exports = {
   buildCloudFunctionPayload,
   callCloudFunction
 };
+
+function isMissingCloudFunctionError(error) {
+  const message = error && (error.errMsg || error.message || String(error));
+
+  return /FUNCTION_NOT_FOUND|-501000|FunctionName parameter could not be found/.test(message);
+}
