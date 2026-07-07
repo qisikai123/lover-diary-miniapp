@@ -181,3 +181,32 @@ test('record cloud function toggles top and removes records', async () => {
 
   assert.equal(db.records.rows.length, 0);
 });
+
+test('record cloud function returns setup guidance when records collection is missing', async () => {
+  const db = {
+    collection() {
+      return {
+        get() {
+          return Promise.reject(new Error('collection.get:fail -502005 database collection not exists'));
+        }
+      };
+    }
+  };
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 400
+  });
+
+  const result = await handler({
+    action: 'getRecordList',
+    payload: {}
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.message, /records 未创建/);
+  assert.deepEqual(result.data, {
+    list: [],
+    total: 0
+  });
+});

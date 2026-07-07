@@ -35,7 +35,15 @@ function callCloudFunction(name, action, payload) {
 
   // 微信云开发是当前项目后端，优先走微信小程序运行时的 `wx.cloud`。
   if (typeof wx !== 'undefined' && wx.cloud) {
-    return wx.cloud.callFunction(options).then((response) => response.result).catch((error) => {
+    return wx.cloud.callFunction(options).then((response) => {
+      const result = response.result;
+
+      if (result && result.success === false) {
+        throw new Error(result.message || '云函数执行失败');
+      }
+
+      return result;
+    }).catch((error) => {
       if (isMissingCloudFunctionError(error)) {
         throw new Error(`云函数 ${name} 未上传或未部署，请在微信开发者工具中上传部署后重试`);
       }

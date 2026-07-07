@@ -3,108 +3,123 @@ function createRecordHandler({ db, getOpenId, now }) {
   const getCurrentTime = now || (() => Date.now());
 
   return async function handleRecord(event) {
-    const action = event.action || 'getRecordList';
-    const payload = event.payload || {};
+    try {
+      const action = event.action || 'getRecordList';
+      const payload = event.payload || {};
 
-    if (action === 'getRecordList') {
-      const response = await records.get();
-      const list = filterRecords(response.data || [], payload);
+      if (action === 'getRecordList') {
+        const response = await records.get();
+        const list = filterRecords(response.data || [], payload);
 
-      return success({
-        list: sortRecords(list),
-        total: list.length
-      });
-    }
+        return success({
+          list: sortRecords(list),
+          total: list.length
+        });
+      }
 
-    if (action === 'getRecordDetail') {
-      const record = await getRecordById(records, payload.id);
+      if (action === 'getRecordDetail') {
+        const record = await getRecordById(records, payload.id);
 
-      return success({
-        record
-      });
-    }
+        return success({
+          record
+        });
+      }
 
-    if (action === 'createRecord') {
-      const createdAt = getCurrentTime();
-      const record = {
-        ...normalizeRecordPayload(payload),
-        openid: getOpenId(),
-        isTop: false,
-        topAt: 0,
-        createdAt,
-        updatedAt: createdAt
+      if (action === 'createRecord') {
+        const createdAt = getCurrentTime();
+        const record = {
+          ...normalizeRecordPayload(payload),
+          openid: getOpenId(),
+          isTop: false,
+          topAt: 0,
+          createdAt,
+          updatedAt: createdAt
+        };
+        const response = await records.add({
+          data: record
+        });
+
+        return success({
+          id: response._id,
+          record: {
+            ...record,
+            _id: response._id
+          }
+        });
+      }
+
+      if (action === 'updateRecord') {
+        const id = payload._id || payload.id;
+        const updatedAt = getCurrentTime();
+        const record = {
+          ...normalizeRecordPayload(payload),
+          updatedAt
+        };
+
+        await records.doc(id).update({
+          data: record
+        });
+
+        return success({
+          id,
+          record: {
+            ...record,
+            _id: id
+          }
+        });
+      }
+
+      if (action === 'removeRecord') {
+        const id = payload.id || payload._id;
+
+        await records.doc(id).remove();
+
+        return success({
+          id
+        });
+      }
+
+      if (action === 'toggleRecordTop') {
+        const id = payload.id || payload._id;
+        const isTop = Boolean(payload.isTop);
+        const data = {
+          isTop,
+          topAt: isTop ? getCurrentTime() : 0,
+          updatedAt: getCurrentTime()
+        };
+
+        await records.doc(id).update({
+          data
+        });
+
+        return success({
+          id,
+          record: {
+            _id: id,
+            ...data
+          }
+        });
+      }
+
+      return {
+        success: false,
+        message: `未知记录操作：${action}`,
+        data: {}
       };
-      const response = await records.add({
-        data: record
-      });
+    } catch (error) {
+      if (isMissingRecordsCollectionError(error)) {
+        return {
+          success: false,
+          message: '云数据库集合 records 未创建，请先在云开发数据库中创建 records 集合',
+          data: {
+            list: [],
+            total: 0
+          }
+        };
+      }
 
-      return success({
-        id: response._id,
-        record: {
-          ...record,
-          _id: response._id
-        }
-      });
+      throw error;
     }
-
-    if (action === 'updateRecord') {
-      const id = payload._id || payload.id;
-      const updatedAt = getCurrentTime();
-      const record = {
-        ...normalizeRecordPayload(payload),
-        updatedAt
-      };
-
-      await records.doc(id).update({
-        data: record
-      });
-
-      return success({
-        id,
-        record: {
-          ...record,
-          _id: id
-        }
-      });
-    }
-
-    if (action === 'removeRecord') {
-      const id = payload.id || payload._id;
-
-      await records.doc(id).remove();
-
-      return success({
-        id
-      });
-    }
-
-    if (action === 'toggleRecordTop') {
-      const id = payload.id || payload._id;
-      const isTop = Boolean(payload.isTop);
-      const data = {
-        isTop,
-        topAt: isTop ? getCurrentTime() : 0,
-        updatedAt: getCurrentTime()
-      };
-
-      await records.doc(id).update({
-        data
-      });
-
-      return success({
-        id,
-        record: {
-          _id: id,
-          ...data
-        }
-      });
-    }
-
-    return {
-      success: false,
-      message: `未知记录操作：${action}`,
-      data: {}
-    };
   };
 }
 
@@ -135,6 +150,12 @@ function success(data) {
     success: true,
     data
   };
+}
+
+function isMissingRecordsCollectionError(error) {
+  const message = error && (error.errMsg || error.message || String(error));
+
+  return /DATABASE_COLLECTION_NOT_EXIST|collection not exists|Db or Table not exist: records|-502005/.test(message);
 }
 
 async function getRecordById(records, id) {
