@@ -9,8 +9,24 @@
       />
 
       <view class="page__toolbar">
-        <button class="page__tool" @click="chooseImages">选择图片</button>
-        <button class="page__tool" @click="chooseVideo">选择视频</button>
+        <u-button
+          class="page__tool"
+          shape="circle"
+          plain
+          :hair-line="false"
+          @click="chooseImages"
+        >
+          选择图片
+        </u-button>
+        <u-button
+          class="page__tool"
+          shape="circle"
+          plain
+          :hair-line="false"
+          @click="chooseVideo"
+        >
+          选择视频
+        </u-button>
       </view>
 
       <record-media-grid
@@ -28,7 +44,15 @@
       </view>
     </view>
 
-    <button class="page__submit" @click="saveRecord">保存记录</button>
+    <u-button
+      class="page__submit"
+      type="primary"
+      shape="circle"
+      :hair-line="false"
+      @click="saveRecord"
+    >
+      保存记录
+    </u-button>
   </view>
 </template>
 
@@ -44,6 +68,9 @@ import {
   normalizeRecordDraft,
   validateRecordDraft
 } from '@/utils/record'
+import {
+  login
+} from '@/services/user/index'
 
 function getToday() {
   const now = new Date()
@@ -61,6 +88,11 @@ export default {
     return {
       recordId: '',
       saving: false,
+      currentUser: {
+        nickname: '',
+        avatarUrl: '',
+        birthDate: ''
+      },
       form: {
         ...createEmptyRecordDraft(),
         recordDate: getToday()
@@ -69,12 +101,42 @@ export default {
   },
   onLoad(options) {
     this.recordId = options && options.id ? options.id : ''
+    this.ensureCurrentUser()
 
     if (this.recordId) {
       this.loadRecordDetail()
     }
   },
   methods: {
+    async ensureCurrentUser() {
+      try {
+        const response = await login(this.getStoredUserProfile())
+        const user = response && response.data ? response.data.user : null
+
+        if (user) {
+          this.currentUser = {
+            nickname: user.nickname || '微信用户',
+            avatarUrl: user.avatarUrl || '',
+            birthDate: user.birthDate || ''
+          }
+          uni.setStorageSync('currentUser', this.currentUser)
+        }
+      } catch (error) {
+        uni.showToast({
+          title: error.message || '登录失败',
+          icon: 'none'
+        })
+      }
+    },
+    getStoredUserProfile() {
+      const user = uni.getStorageSync('currentUser') || {}
+
+      return {
+        nickname: user.nickname || user.nickName || '',
+        avatarUrl: user.avatarUrl || '',
+        birthDate: user.birthDate || ''
+      }
+    },
     chooseImages() {
       if (this.form.recordType === 'video') {
         uni.showToast({
@@ -243,9 +305,14 @@ export default {
         return
       }
 
+      if (!this.currentUser.nickname) {
+        await this.ensureCurrentUser()
+      }
+
       const draft = normalizeRecordDraft({
         ...this.form,
-        _id: this.recordId
+        _id: this.recordId,
+        authorName: this.currentUser.nickname || '微信用户'
       })
       const validation = validateRecordDraft(this.form)
 
@@ -309,12 +376,9 @@ export default {
 }
 
 .page__tool {
+  width: 100%;
   flex: 1;
-  border: 2rpx solid $cl-color-border;
-  border-radius: 20rpx;
-  background: #fff;
   color: $cl-color-text;
-  font-size: 28rpx;
 }
 
 .page__date-row {
@@ -339,9 +403,6 @@ export default {
 
 .page__submit {
   margin-top: 32rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, #d27d56, #e9a47f);
-  color: #fff;
-  font-size: 30rpx;
+  width: 100%;
 }
 </style>

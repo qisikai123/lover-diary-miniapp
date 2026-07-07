@@ -68,8 +68,8 @@ function buildRecordDateRange(filters, baseDate) {
 /**
  * 规范化编辑页草稿，避免页面层和云函数对字段默认值理解不一致。
  *
- * @param {{_id?: string, content?: string, recordDate?: string, recordType?: string, mediaList?: Array}} draft
- * @returns {{_id?: string, content: string, recordDate: string, recordType: string, mediaList: Array}}
+ * @param {{_id?: string, content?: string, authorName?: string, recordDate?: string, recordType?: string, mediaList?: Array}} draft
+ * @returns {{_id?: string, content: string, authorName?: string, recordDate: string, recordType: string, mediaList: Array}}
  */
 function normalizeRecordDraft(draft) {
   const nextDraft = draft || {};
@@ -80,6 +80,10 @@ function normalizeRecordDraft(draft) {
     recordType: inferRecordType(mediaList),
     mediaList
   };
+
+  if (typeof nextDraft.authorName === 'string' && nextDraft.authorName.trim()) {
+    normalizedDraft.authorName = nextDraft.authorName.trim();
+  }
 
   if (nextDraft._id) {
     normalizedDraft._id = nextDraft._id;

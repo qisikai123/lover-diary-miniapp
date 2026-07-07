@@ -4,8 +4,8 @@ const {
   createRecordHandler
 } = require('../../cloudfunctions/record/index');
 
-function createMemoryCollection(initialRecords) {
-  const rows = (initialRecords || []).map((item) => ({ ...item }));
+function createMemoryCollection(initialRows) {
+  const rows = (initialRows || []).map((item) => ({ ...item }));
 
   return {
     rows,
@@ -13,6 +13,15 @@ function createMemoryCollection(initialRecords) {
       return Promise.resolve({
         data: rows.slice()
       });
+    },
+    where(query) {
+      return {
+        get() {
+          return Promise.resolve({
+            data: rows.filter((item) => Object.keys(query).every((key) => item[key] === query[key]))
+          });
+        }
+      };
     },
     add({ data }) {
       const _id = data._id || `record-${rows.length + 1}`;
@@ -66,14 +75,23 @@ function createMemoryCollection(initialRecords) {
   };
 }
 
-function createMemoryDb(initialRecords) {
+function createMemoryDb(initialRecords, initialUsers) {
   const records = createMemoryCollection(initialRecords);
+  const users = createMemoryCollection(initialUsers);
 
   return {
     records,
+    users,
     collection(name) {
-      assert.equal(name, 'records');
-      return records;
+      if (name === 'records') {
+        return records;
+      }
+
+      if (name === 'users') {
+        return users;
+      }
+
+      throw new Error(`unexpected collection ${name}`);
     }
   };
 }
@@ -90,6 +108,7 @@ test('record cloud function creates and lists records in product order', async (
     action: 'createRecord',
     payload: {
       content: 'first day',
+      authorName: '小明',
       recordDate: '2026-07-06',
       recordType: 'text',
       mediaList: []
@@ -98,6 +117,7 @@ test('record cloud function creates and lists records in product order', async (
 
   assert.equal(createResult.success, true);
   assert.equal(db.records.rows[0].openid, 'openid-a');
+  assert.equal(db.records.rows[0].authorName, '小明');
 
   const listResult = await handler({
     action: 'getRecordList',
@@ -105,6 +125,60 @@ test('record cloud function creates and lists records in product order', async (
   });
 
   assert.deepEqual(listResult.data.list.map((item) => item.content), ['first day']);
+  assert.deepEqual(listResult.data.list.map((item) => item.authorName), ['小明']);
+});
+
+test('record cloud function uses current user nickname when author name is missing', async () => {
+  const db = createMemoryDb([], [
+    {
+      _id: 'user-1',
+      openid: 'openid-a',
+      nickname: '小红'
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 150
+  });
+
+  const createResult = await handler({
+    action: 'createRecord',
+    payload: {
+      content: 'from phone',
+      recordDate: '2026-07-07',
+      mediaList: []
+    }
+  });
+
+  assert.equal(createResult.success, true);
+  assert.equal(db.records.rows[0].authorName, '小红');
+});
+
+test('record cloud function returns author name field for legacy list records', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'legacy',
+      recordDate: '2026-07-07',
+      recordType: 'text',
+      mediaList: [],
+      createdAt: 1
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 175
+  });
+
+  const listResult = await handler({
+    action: 'getRecordList',
+    payload: {}
+  });
+
+  assert.equal(listResult.success, true);
+  assert.equal(listResult.data.list[0].authorName, '我们');
 });
 
 test('record cloud function updates and returns record detail', async () => {
@@ -145,6 +219,37 @@ test('record cloud function updates and returns record detail', async () => {
   assert.equal(detailResult.data.record.updatedAt, 200);
 });
 
+test('record cloud function does not overwrite author name while editing records', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'before',
+      authorName: '原发布人',
+      recordDate: '2026-07-05',
+      recordType: 'text',
+      mediaList: [],
+      createdAt: 1
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 250
+  });
+
+  await handler({
+    action: 'updateRecord',
+    payload: {
+      _id: 'record-1',
+      content: 'after',
+      recordDate: '2026-07-06',
+      mediaList: []
+    }
+  });
+
+  assert.equal(db.records.rows[0].authorName, '原发布人');
+});
+
 test('record cloud function toggles top and removes records', async () => {
   const db = createMemoryDb([
     {
@@ -180,6 +285,120 @@ test('record cloud function toggles top and removes records', async () => {
   });
 
   assert.equal(db.records.rows.length, 0);
+});
+
+test('record cloud function creates comments with current user identity', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'with comments',
+      recordDate: '2026-07-06',
+      recordType: 'text',
+      mediaList: [],
+      comments: []
+    }
+  ], [
+    {
+      _id: 'user-1',
+      openid: 'openid-a',
+      nickname: '小红'
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 500
+  });
+
+  const result = await handler({
+    action: 'createComment',
+    payload: {
+      recordId: 'record-1',
+      content: '今天很开心'
+    }
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(db.records.rows[0].comments.length, 1);
+  assert.equal(db.records.rows[0].comments[0].openid, 'openid-a');
+  assert.equal(db.records.rows[0].comments[0].authorName, '小红');
+  assert.equal(db.records.rows[0].comments[0].content, '今天很开心');
+  assert.equal(db.records.rows[0].comments[0].createdAt, 500);
+});
+
+test('record cloud function only lets comment owner remove comments', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'with comments',
+      recordDate: '2026-07-06',
+      recordType: 'text',
+      mediaList: [],
+      comments: [
+        {
+          id: 'comment-1',
+          openid: 'openid-a',
+          authorName: '小红',
+          content: '可删除',
+          createdAt: 480
+        }
+      ]
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-b',
+    now: () => 550
+  });
+
+  const deniedResult = await handler({
+    action: 'removeComment',
+    payload: {
+      recordId: 'record-1',
+      commentId: 'comment-1'
+    }
+  });
+
+  assert.equal(deniedResult.success, false);
+  assert.match(deniedResult.message, /只能删除自己的评论/);
+  assert.equal(db.records.rows[0].comments.length, 1);
+});
+
+test('record cloud function removes comments for comment owner', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'with comments',
+      recordDate: '2026-07-06',
+      recordType: 'text',
+      mediaList: [],
+      comments: [
+        {
+          id: 'comment-1',
+          openid: 'openid-a',
+          authorName: '小红',
+          content: '可删除',
+          createdAt: 480
+        }
+      ]
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 600
+  });
+
+  const result = await handler({
+    action: 'removeComment',
+    payload: {
+      recordId: 'record-1',
+      commentId: 'comment-1'
+    }
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(db.records.rows[0].comments.length, 0);
 });
 
 test('record cloud function returns setup guidance when records collection is missing', async () => {

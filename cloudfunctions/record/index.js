@@ -1,5 +1,6 @@
 function createRecordHandler({ db, getOpenId, now }) {
   const records = db.collection('records');
+  const users = db.collection('users');
   const getCurrentTime = now || (() => Date.now());
 
   return async function handleRecord(event) {
@@ -9,7 +10,7 @@ function createRecordHandler({ db, getOpenId, now }) {
 
       if (action === 'getRecordList') {
         const response = await records.get();
-        const list = filterRecords(response.data || [], payload);
+        const list = filterRecords(response.data || [], payload).map(normalizeRecordForList);
 
         return success({
           list: sortRecords(list),
@@ -27,9 +28,17 @@ function createRecordHandler({ db, getOpenId, now }) {
 
       if (action === 'createRecord') {
         const createdAt = getCurrentTime();
+        const openid = getOpenId();
         const record = {
-          ...normalizeRecordPayload(payload),
-          openid: getOpenId(),
+          ...normalizeRecordPayload(payload, {
+            authorName: await resolveAuthorName({
+              payload,
+              users,
+              openid
+            })
+          }),
+          openid,
+          comments: [],
           isTop: false,
           topAt: 0,
           createdAt,
@@ -66,6 +75,108 @@ function createRecordHandler({ db, getOpenId, now }) {
             ...record,
             _id: id
           }
+        });
+      }
+
+      if (action === 'createComment') {
+        const id = payload.recordId || payload.id || payload._id;
+        const openid = getOpenId();
+        const createdAt = getCurrentTime();
+        const content = normalizeCommentContent(payload.content);
+
+        if (!content) {
+          return {
+            success: false,
+            message: '请输入评论内容',
+            data: {}
+          };
+        }
+
+        const record = await getRecordById(records, id);
+
+        if (!record) {
+          return {
+            success: false,
+            message: '记录不存在',
+            data: {}
+          };
+        }
+
+        const existingComments = normalizeComments(record.comments);
+        const comment = {
+          id: createCommentId(openid, createdAt, existingComments.length),
+          openid,
+          authorName: await resolveAuthorName({
+            payload,
+            users,
+            openid
+          }),
+          content,
+          createdAt
+        };
+        const comments = existingComments.concat(comment);
+
+        await records.doc(id).update({
+          data: {
+            comments,
+            updatedAt: createdAt
+          }
+        });
+
+        return success({
+          id,
+          comment,
+          comments
+        });
+      }
+
+      if (action === 'removeComment') {
+        const id = payload.recordId || payload.id || payload._id;
+        const commentId = payload.commentId;
+        const openid = getOpenId();
+        const updatedAt = getCurrentTime();
+        const record = await getRecordById(records, id);
+
+        if (!record) {
+          return {
+            success: false,
+            message: '记录不存在',
+            data: {}
+          };
+        }
+
+        const comments = normalizeComments(record.comments);
+        const targetComment = comments.find((comment) => comment.id === commentId);
+
+        if (!targetComment) {
+          return {
+            success: false,
+            message: '评论不存在',
+            data: {}
+          };
+        }
+
+        if (targetComment.openid !== openid) {
+          return {
+            success: false,
+            message: '只能删除自己的评论',
+            data: {}
+          };
+        }
+
+        const nextComments = comments.filter((comment) => comment.id !== commentId);
+
+        await records.doc(id).update({
+          data: {
+            comments: nextComments,
+            updatedAt
+          }
+        });
+
+        return success({
+          id,
+          commentId,
+          comments: nextComments
         });
       }
 
@@ -168,15 +279,37 @@ async function getRecordById(records, id) {
   return response.data || null;
 }
 
-function normalizeRecordPayload(payload) {
+function normalizeRecordPayload(payload, options) {
   const mediaList = Array.isArray(payload.mediaList) ? payload.mediaList : [];
-
-  return {
+  const normalizedPayload = {
     content: typeof payload.content === 'string' ? payload.content.trim() : '',
     recordDate: payload.recordDate || '',
     recordType: inferRecordType(mediaList),
     mediaList
   };
+
+  if (options && options.authorName) {
+    normalizedPayload.authorName = options.authorName;
+  }
+
+  return normalizedPayload;
+}
+
+async function resolveAuthorName({ payload, users, openid }) {
+  if (typeof payload.authorName === 'string' && payload.authorName.trim()) {
+    return payload.authorName.trim();
+  }
+
+  const response = await users.where({
+    openid
+  }).get();
+  const user = (response.data || [])[0];
+
+  if (user && typeof user.nickname === 'string' && user.nickname.trim()) {
+    return user.nickname.trim();
+  }
+
+  return '微信用户';
 }
 
 function inferRecordType(mediaList) {
@@ -199,6 +332,42 @@ function filterRecords(records, payload) {
 
     return true;
   });
+}
+
+function normalizeRecordForList(record) {
+  return {
+    ...record,
+    comments: normalizeComments(record.comments),
+    authorName: typeof record.authorName === 'string' && record.authorName.trim()
+      ? record.authorName.trim()
+      : '我们'
+  };
+}
+
+function normalizeComments(comments) {
+  if (!Array.isArray(comments)) {
+    return [];
+  }
+
+  return comments
+    .filter((comment) => comment && comment.id)
+    .map((comment) => ({
+      id: comment.id,
+      openid: comment.openid || '',
+      authorName: typeof comment.authorName === 'string' && comment.authorName.trim()
+        ? comment.authorName.trim()
+        : '微信用户',
+      content: normalizeCommentContent(comment.content),
+      createdAt: comment.createdAt || 0
+    }));
+}
+
+function normalizeCommentContent(content) {
+  return typeof content === 'string' ? content.trim() : '';
+}
+
+function createCommentId(openid, createdAt, index) {
+  return `comment-${createdAt}-${index}-${String(openid || 'user').slice(-8)}`;
 }
 
 function sortRecords(records) {

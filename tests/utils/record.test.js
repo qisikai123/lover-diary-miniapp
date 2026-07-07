@@ -60,6 +60,18 @@ test('normalizeRecordDraft trims content and infers record type', () => {
   );
 });
 
+test('normalizeRecordDraft preserves author name for record creation', () => {
+  assert.equal(
+    normalizeRecordDraft({
+      content: 'today',
+      authorName: '小明',
+      recordDate: '2026-07-07',
+      mediaList: []
+    }).authorName,
+    '小明'
+  );
+});
+
 test('buildRecordDateRange returns current month bounds', () => {
   assert.deepEqual(
     buildRecordDateRange({ shortcut: 'month' }, new Date('2026-07-06T00:00:00.000Z')),

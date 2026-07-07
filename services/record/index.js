@@ -50,9 +50,31 @@ function toggleRecordTop(payload) {
   return callCloudFunction('record', 'toggleRecordTop', payload);
 }
 
+/**
+ * 新增记录评论。
+ *
+ * @param {{recordId: string, content: string}} payload
+ * @returns {Promise<any>}
+ */
+function createRecordComment(payload) {
+  return callCloudFunction('record', 'createComment', payload);
+}
+
+/**
+ * 删除记录评论。
+ *
+ * @param {{recordId: string, commentId: string}} payload
+ * @returns {Promise<any>}
+ */
+function removeRecordComment(payload) {
+  return callCloudFunction('record', 'removeComment', payload);
+}
+
 module.exports = {
+  createRecordComment,
   getRecordDetail,
   getRecordList,
+  removeRecordComment,
   removeRecord,
   saveRecord,
   toggleRecordTop
