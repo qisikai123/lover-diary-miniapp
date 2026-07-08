@@ -78,7 +78,7 @@ function createRecordHandler({ db, getOpenId, now }) {
         });
       }
 
-      if (action === 'createComment') {
+      if (action === 'createComment' || action === 'createRecordComment') {
         const id = payload.recordId || payload.id || payload._id;
         const openid = getOpenId();
         const createdAt = getCurrentTime();
@@ -130,7 +130,7 @@ function createRecordHandler({ db, getOpenId, now }) {
         });
       }
 
-      if (action === 'removeComment') {
+      if (action === 'removeComment' || action === 'removeRecordComment') {
         const id = payload.recordId || payload.id || payload._id;
         const commentId = payload.commentId;
         const openid = getOpenId();

@@ -79,7 +79,24 @@
         v-for="comment in normalizedComments"
         :key="comment.id"
         class="record-card__comment"
+        @longpress="openCommentRemoveBubble(comment)"
+        @click="closeCommentRemoveBubble"
       >
+        <view
+          v-if="activeCommentMenuId === comment.id"
+          class="record-card__comment-bubble"
+          @click.stop="handleRemoveComment(comment)"
+        >
+          <u-button
+            class="record-card__comment-bubble-button"
+            size="mini"
+            shape="circle"
+            type="error"
+            :hair-line="false"
+          >
+            删除
+          </u-button>
+        </view>
         <view class="record-card__comment-header">
           <text class="record-card__comment-author">{{
             comment.authorName
@@ -89,28 +106,14 @@
           }}</text>
         </view>
         <text class="record-card__comment-content">{{ comment.content }}</text>
-        <u-button
-          v-if="canRemoveComment(comment)"
-          class="record-card__comment-remove"
-          size="mini"
-          shape="circle"
-          plain
-          :hair-line="false"
-          @click="handleRemoveComment(comment)"
-        >
-          删除
-        </u-button>
       </view>
     </view>
 
-    <view
-      class="record-card__comment-editor"
-      :class="{ 'record-card__comment-editor--visible': commentEditorVisible }"
-    >
-      <textarea
+    <view v-if="commentEditorVisible" class="record-card__comment-editor">
+      <u-input
         v-model="commentDraft"
-        class="record-card__comment-input"
         maxlength="300"
+        auto-height
         placeholder="写下你的评论"
       />
       <view class="record-card__comment-actions">
@@ -130,9 +133,9 @@
           type="primary"
           shape="circle"
           :hair-line="false"
-          @click="submitComment"
+          @click="confirmComment"
         >
-          发送
+          确定
         </u-button>
       </view>
     </view>
@@ -159,6 +162,7 @@ export default {
   data() {
     return {
       actionMenuVisible: false,
+      activeCommentMenuId: '',
       commentDraft: '',
       commentEditorVisible: false,
     }
@@ -202,7 +206,7 @@ export default {
       this.commentDraft = ''
       this.commentEditorVisible = false
     },
-    submitComment() {
+    confirmComment() {
       const content = this.commentDraft.trim()
 
       if (!content) {
@@ -225,10 +229,23 @@ export default {
       )
     },
     handleRemoveComment(comment) {
+      this.activeCommentMenuId = ''
       this.$emit('remove-comment', {
         record: this.record,
         comment,
       })
+    },
+    openCommentRemoveBubble(comment) {
+      this.closeCommentRemoveBubble()
+
+      if (!this.canRemoveComment(comment)) {
+        return
+      }
+
+      this.activeCommentMenuId = comment.id
+    },
+    closeCommentRemoveBubble() {
+      this.activeCommentMenuId = ''
     },
     formatCommentTime(timestamp) {
       if (!timestamp) {
@@ -392,12 +409,6 @@ export default {
   white-space: pre-wrap;
 }
 
-.record-card__comment-remove {
-  width: 112rpx;
-  margin: 12rpx 0 0 auto;
-  color: $cl-color-subtext;
-}
-
 .record-card__comment-editor {
   max-height: 0;
   margin-top: 0;
@@ -437,5 +448,53 @@ export default {
 
 .record-card__comment-button {
   width: 100%;
+}
+
+.record-card__comment-editor {
+  max-height: none;
+  margin-top: 22rpx;
+  opacity: 1;
+  overflow: visible;
+  transform: none;
+  transition: none;
+}
+
+.record-card__comment-editor--visible {
+  max-height: none;
+  opacity: 1;
+  overflow: visible;
+  transform: none;
+}
+.record-card__comment {
+  position: relative;
+}
+
+.record-card__comment-bubble {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  z-index: 4;
+  margin-bottom: 12rpx;
+  padding: 10rpx;
+  border-radius: 999rpx;
+  background: #fff;
+  box-shadow: 0 14rpx 36rpx rgba(53, 38, 30, 0.16);
+}
+
+.record-card__comment-bubble::after {
+  position: absolute;
+  right: 34rpx;
+  bottom: -10rpx;
+  width: 20rpx;
+  height: 20rpx;
+  background: #fff;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.record-card__comment-bubble-button {
+  position: relative;
+  z-index: 1;
+  width: 112rpx;
 }
 </style>

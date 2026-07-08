@@ -37,9 +37,11 @@
       />
 
       <view class="page__date-row">
-        <text class="page__date-label">记录日期</text>
+        <text class="page__date-label">当前日期</text>
         <picker mode="date" :value="form.recordDate" @change="handleDateChange">
-          <view class="page__date-value">{{ form.recordDate || '请选择日期' }}</view>
+          <view class="page__date-value">{{
+            form.recordDate || '请选择日期'
+          }}</view>
         </picker>
       </view>
     </view>
@@ -51,7 +53,7 @@
       :hair-line="false"
       @click="saveRecord"
     >
-      保存记录
+      发布
     </u-button>
   </view>
 </template>
@@ -60,17 +62,15 @@
 import RecordMediaGrid from '@/components/record-media-grid/index.vue'
 import {
   getRecordDetail,
-  saveRecord as submitRecord
+  saveRecord as submitRecord,
 } from '@/services/record/index'
 import {
   createEmptyRecordDraft,
   inferRecordType,
   normalizeRecordDraft,
-  validateRecordDraft
+  validateRecordDraft,
 } from '@/utils/record'
-import {
-  login
-} from '@/services/user/index'
+import { login } from '@/services/user/index'
 
 function getToday() {
   const now = new Date()
@@ -82,7 +82,7 @@ function getToday() {
 
 export default {
   components: {
-    RecordMediaGrid
+    RecordMediaGrid,
   },
   data() {
     return {
@@ -91,12 +91,12 @@ export default {
       currentUser: {
         nickname: '',
         avatarUrl: '',
-        birthDate: ''
+        birthDate: '',
       },
       form: {
         ...createEmptyRecordDraft(),
-        recordDate: getToday()
-      }
+        recordDate: getToday(),
+      },
     }
   },
   onLoad(options) {
@@ -117,14 +117,14 @@ export default {
           this.currentUser = {
             nickname: user.nickname || '微信用户',
             avatarUrl: user.avatarUrl || '',
-            birthDate: user.birthDate || ''
+            birthDate: user.birthDate || '',
           }
           uni.setStorageSync('currentUser', this.currentUser)
         }
       } catch (error) {
         uni.showToast({
           title: error.message || '登录失败',
-          icon: 'none'
+          icon: 'none',
         })
       }
     },
@@ -134,14 +134,14 @@ export default {
       return {
         nickname: user.nickname || user.nickName || '',
         avatarUrl: user.avatarUrl || '',
-        birthDate: user.birthDate || ''
+        birthDate: user.birthDate || '',
       }
     },
     chooseImages() {
       if (this.form.recordType === 'video') {
         uni.showToast({
           title: '已选择视频时不能再上传图片',
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
@@ -151,7 +151,7 @@ export default {
       if (remainingCount <= 0) {
         uni.showToast({
           title: '图片最多上传9张',
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
@@ -164,17 +164,17 @@ export default {
           await this.uploadSelectedMedia(
             result.tempFilePaths.map((path) => ({
               path,
-              mediaType: 'image'
+              mediaType: 'image',
             }))
           )
-        }
+        },
       })
     },
     chooseVideo() {
       if (this.form.recordType === 'image') {
         uni.showToast({
           title: '已选择图片时不能再上传视频',
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
@@ -182,7 +182,7 @@ export default {
       if (this.form.recordType === 'video') {
         uni.showToast({
           title: '视频最多上传1个',
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
@@ -196,38 +196,40 @@ export default {
             {
               path: result.tempFilePath,
               mediaType: 'video',
-              name: '视频'
-            }
+              name: '视频',
+            },
           ])
-        }
+        },
       })
     },
     removeMedia(index) {
-      const mediaList = this.form.mediaList.filter((_, itemIndex) => itemIndex !== index)
+      const mediaList = this.form.mediaList.filter(
+        (_, itemIndex) => itemIndex !== index
+      )
 
       this.form = {
         ...this.form,
         mediaList,
-        recordType: inferRecordType(mediaList)
+        recordType: inferRecordType(mediaList),
       }
     },
     handleDateChange(event) {
       this.form = {
         ...this.form,
-        recordDate: event.detail.value
+        recordDate: event.detail.value,
       }
     },
     async loadRecordDetail() {
       try {
         const response = await getRecordDetail({
-          id: this.recordId
+          id: this.recordId,
         })
         const record = response && response.data ? response.data.record : null
 
         if (!record) {
           uni.showToast({
             title: '记录不存在',
-            icon: 'none'
+            icon: 'none',
           })
           return
         }
@@ -235,12 +237,12 @@ export default {
         this.form = {
           ...createEmptyRecordDraft(),
           ...record,
-          mediaList: Array.isArray(record.mediaList) ? record.mediaList : []
+          mediaList: Array.isArray(record.mediaList) ? record.mediaList : [],
         }
       } catch (error) {
         uni.showToast({
           title: error.message || '记录加载失败',
-          icon: 'none'
+          icon: 'none',
         })
       }
     },
@@ -252,13 +254,13 @@ export default {
       if (typeof wx === 'undefined' || !wx.cloud || !wx.cloud.uploadFile) {
         uni.showToast({
           title: '当前环境不支持云存储上传',
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
 
       uni.showLoading({
-        title: '上传中'
+        title: '上传中',
       })
 
       try {
@@ -268,13 +270,13 @@ export default {
           const cloudPath = this.buildCloudPath(file)
           const response = await wx.cloud.uploadFile({
             cloudPath,
-            filePath: file.path
+            filePath: file.path,
           })
 
           uploadedMedia.push({
             mediaType: file.mediaType,
             url: response.fileID,
-            name: file.name || cloudPath.split('/').pop()
+            name: file.name || cloudPath.split('/').pop(),
           })
         }
 
@@ -283,22 +285,27 @@ export default {
         this.form = {
           ...this.form,
           mediaList,
-          recordType: inferRecordType(mediaList)
+          recordType: inferRecordType(mediaList),
         }
       } catch (error) {
         uni.showToast({
           title: error.message || '上传失败',
-          icon: 'none'
+          icon: 'none',
         })
       } finally {
         uni.hideLoading()
       }
     },
     buildCloudPath(file) {
-      const suffix = file.path && file.path.includes('.') ? file.path.split('.').pop() : 'tmp'
+      const suffix =
+        file.path && file.path.includes('.')
+          ? file.path.split('.').pop()
+          : 'tmp'
       const directory = file.mediaType === 'video' ? 'videos' : 'images'
 
-      return `records/${directory}/${Date.now()}-${Math.random().toString(16).slice(2)}.${suffix}`
+      return `records/${directory}/${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}.${suffix}`
     },
     async saveRecord() {
       if (this.saving) {
@@ -312,14 +319,14 @@ export default {
       const draft = normalizeRecordDraft({
         ...this.form,
         _id: this.recordId,
-        authorName: this.currentUser.nickname || '微信用户'
+        authorName: this.currentUser.nickname || '微信用户',
       })
       const validation = validateRecordDraft(this.form)
 
       if (!validation.valid) {
         uni.showToast({
           title: validation.message,
-          icon: 'none'
+          icon: 'none',
         })
         return
       }
@@ -330,7 +337,7 @@ export default {
         await submitRecord(draft)
         uni.showToast({
           title: '已保存',
-          icon: 'success'
+          icon: 'success',
         })
         setTimeout(() => {
           uni.navigateBack()
@@ -338,13 +345,13 @@ export default {
       } catch (error) {
         uni.showToast({
           title: error.message || '保存失败',
-          icon: 'none'
+          icon: 'none',
         })
       } finally {
         this.saving = false
       }
-    }
-  }
+    },
+  },
 }
 </script>
 
