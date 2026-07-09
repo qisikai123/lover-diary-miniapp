@@ -1,17 +1,20 @@
 <template>
   <view v-if="items.length" class="media-grid">
     <view
-      v-for="(item, index) in items"
+      v-for="(item, index) in displayItems"
       :key="index"
       class="media-grid__item"
     >
       <image
-        v-if="mode === 'image'"
+        v-if="mode === 'image' && item.displayUrl"
         class="media-grid__image"
-        :src="item.url"
+        :src="item.displayUrl"
         mode="aspectFill"
         @click="previewImage(index)"
       />
+      <view v-else-if="mode === 'image'" class="media-grid__loading">
+        图片加载中
+      </view>
       <view v-else class="media-grid__video" @click="previewVideo(item)">
         <text class="media-grid__video-icon">▶</text>
         <text class="media-grid__video-label">{{ item.name || '视频' }}</text>
@@ -37,9 +40,19 @@ export default {
       default: false
     }
   },
+  computed: {
+    displayItems() {
+      return this.items.map((item) => ({
+        ...item,
+        displayUrl: item.displayUrl || (/^cloud:\/\//.test(item.url) ? '' : item.url)
+      }))
+    }
+  },
   methods: {
     previewImage(index) {
-      const urls = this.items.map((item) => item.url).filter(Boolean)
+      const urls = this.displayItems
+        .map((item) => item.displayUrl)
+        .filter(Boolean)
 
       if (!urls.length) {
         return
@@ -51,7 +64,13 @@ export default {
       })
     },
     previewVideo(item) {
-      if (!item || !item.url) {
+      const url = item && item.displayUrl
+
+      if (!url) {
+        uni.showToast({
+          title: '视频加载中，请稍后重试',
+          icon: 'none'
+        })
         return
       }
 
@@ -59,7 +78,7 @@ export default {
         wx.previewMedia({
           sources: [
             {
-              url: item.url,
+              url,
               type: 'video'
             }
           ]
@@ -93,17 +112,24 @@ export default {
 }
 
 .media-grid__image,
-.media-grid__video {
+.media-grid__video,
+.media-grid__loading {
   width: 100%;
   height: 100%;
 }
 
-.media-grid__video {
+.media-grid__video,
+.media-grid__loading {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   color: $cl-color-text;
+}
+
+.media-grid__loading {
+  font-size: 24rpx;
+  color: #9b877c;
 }
 
 .media-grid__video-icon {

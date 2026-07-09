@@ -35,7 +35,40 @@
   "simulatorPluginLibVersion": {},
   "packOptions": {
     "ignore": [],
-    "include": []
+    "include": [
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-datetime-picker/u-datetime-picker.js"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-datetime-picker/u-datetime-picker.json"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-datetime-picker/u-datetime-picker.wxml"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-datetime-picker/u-datetime-picker.wxss"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-picker/u-picker.js"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-picker/u-picker.json"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-picker/u-picker.wxml"
+      },
+      {
+        "type": "file",
+        "value": "node-modules/uview-ui/components/u-picker/u-picker.wxss"
+      }
+    ]
   },
   "editorSetting": {}
 }

@@ -19,7 +19,6 @@
           >
             <u-button
               class="record-card__action"
-              size="mini"
               shape="circle"
               plain
               :hair-line="false"
@@ -30,7 +29,6 @@
             <u-button
               v-if="canManageRecord"
               class="record-card__action"
-              size="mini"
               shape="circle"
               plain
               :hair-line="false"
@@ -41,7 +39,6 @@
             <u-button
               v-if="canManageRecord"
               class="record-card__action"
-              size="mini"
               shape="circle"
               plain
               :hair-line="false"
@@ -51,7 +48,6 @@
             </u-button>
             <u-button
               class="record-card__action"
-              size="mini"
               shape="circle"
               plain
               :hair-line="false"
@@ -230,9 +226,20 @@ export default {
     },
     handleRemoveComment(comment) {
       this.activeCommentMenuId = ''
-      this.$emit('remove-comment', {
-        record: this.record,
-        comment,
+      uni.showModal({
+        title: '删除评论',
+        content: '删除后无法恢复，确定要删除这条评论吗？',
+        confirmColor: '#d27d56',
+        success: (result) => {
+          if (!result.confirm) {
+            return
+          }
+
+          this.$emit('remove-comment', {
+            record: this.record,
+            comment,
+          })
+        },
       })
     },
     openCommentRemoveBubble(comment) {
@@ -335,9 +342,9 @@ export default {
   z-index: 3;
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  width: 176rpx;
-  padding: 14rpx;
+  gap: 16rpx;
+  width: 228rpx;
+  padding: 18rpx;
   border: 2rpx solid rgba(236, 220, 207, 0.8);
   border-radius: 24rpx;
   background: #fff;
@@ -357,6 +364,9 @@ export default {
 
 .record-card__action {
   width: 100%;
+  min-height: 68rpx;
+  font-size: 30rpx;
+  line-height: 68rpx;
   color: $cl-color-subtext;
 }
 

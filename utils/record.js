@@ -78,7 +78,7 @@ function normalizeRecordDraft(draft) {
     content: typeof nextDraft.content === 'string' ? nextDraft.content.trim() : '',
     recordDate: nextDraft.recordDate || '',
     recordType: inferRecordType(mediaList),
-    mediaList
+    mediaList: normalizePersistedMediaList(mediaList)
   };
 
   if (typeof nextDraft.authorName === 'string' && nextDraft.authorName.trim()) {
@@ -188,6 +188,14 @@ module.exports = {
   sortRecords,
   validateRecordDraft
 };
+
+function normalizePersistedMediaList(mediaList) {
+  return mediaList.map((item) => ({
+    mediaType: item && item.mediaType ? item.mediaType : '',
+    url: item && item.url ? item.url : '',
+    name: item && item.name ? item.name : ''
+  }));
+}
 
 function compareDesc(left, right) {
   const leftValue = left || '';

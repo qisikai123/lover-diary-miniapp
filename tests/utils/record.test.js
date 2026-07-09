@@ -48,14 +48,20 @@ test('normalizeRecordDraft trims content and infers record type', () => {
       _id: 'record-1',
       content: '  dinner  ',
       recordDate: '2026-07-06',
-      mediaList: [{ mediaType: 'image', url: 'cloud://image-a' }]
+      mediaList: [
+        {
+          mediaType: 'image',
+          url: 'cloud://image-a',
+          displayUrl: 'https://tmp.example.com/image-a.jpg'
+        }
+      ]
     }),
     {
       _id: 'record-1',
       content: 'dinner',
       recordDate: '2026-07-06',
       recordType: 'image',
-      mediaList: [{ mediaType: 'image', url: 'cloud://image-a' }]
+      mediaList: [{ mediaType: 'image', url: 'cloud://image-a', name: '' }]
     }
   );
 });

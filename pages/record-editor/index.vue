@@ -276,6 +276,7 @@ export default {
           uploadedMedia.push({
             mediaType: file.mediaType,
             url: response.fileID,
+            displayUrl: await this.resolveUploadedMediaUrl(response.fileID),
             name: file.name || cloudPath.split('/').pop(),
           })
         }
@@ -306,6 +307,21 @@ export default {
       return `records/${directory}/${Date.now()}-${Math.random()
         .toString(16)
         .slice(2)}.${suffix}`
+    },
+    async resolveUploadedMediaUrl(fileID) {
+      if (!fileID || !wx.cloud.getTempFileURL) {
+        return ''
+      }
+
+      const response = await wx.cloud.getTempFileURL({
+        fileList: [fileID],
+      })
+      const fileList = Array.isArray(response.fileList)
+        ? response.fileList
+        : []
+      const file = fileList[0]
+
+      return file && file.tempFileURL ? file.tempFileURL : ''
     },
     async saveRecord() {
       if (this.saving) {

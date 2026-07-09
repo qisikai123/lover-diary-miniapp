@@ -181,6 +181,47 @@ test('record cloud function returns author name field for legacy list records', 
   assert.equal(listResult.data.list[0].authorName, '我们');
 });
 
+test('record cloud function resolves media display urls for record list', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'image',
+      recordDate: '2026-07-07',
+      recordType: 'image',
+      mediaList: [
+        {
+          mediaType: 'image',
+          url: 'cloud://image-a'
+        }
+      ],
+      createdAt: 1
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    getTempFileURL: (fileList) => Promise.resolve({
+      fileList: fileList.map((fileID) => ({
+        fileID,
+        tempFileURL: `https://tmp.example.com/${fileID.slice('cloud://'.length)}.jpg`
+      }))
+    }),
+    now: () => 180
+  });
+
+  const listResult = await handler({
+    action: 'getRecordList',
+    payload: {}
+  });
+
+  assert.equal(listResult.success, true);
+  assert.equal(listResult.data.list[0].mediaList[0].url, 'cloud://image-a');
+  assert.equal(
+    listResult.data.list[0].mediaList[0].displayUrl,
+    'https://tmp.example.com/image-a.jpg'
+  );
+});
+
 test('record cloud function updates and returns record detail', async () => {
   const db = createMemoryDb([
     {
@@ -217,6 +258,91 @@ test('record cloud function updates and returns record detail', async () => {
 
   assert.equal(detailResult.data.record.content, 'after');
   assert.equal(detailResult.data.record.updatedAt, 200);
+});
+
+test('record cloud function strips temporary display urls while updating records', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'before',
+      recordDate: '2026-07-05',
+      recordType: 'image',
+      mediaList: [],
+      createdAt: 1
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    now: () => 215
+  });
+
+  await handler({
+    action: 'updateRecord',
+    payload: {
+      _id: 'record-1',
+      content: 'after',
+      recordDate: '2026-07-06',
+      mediaList: [
+        {
+          mediaType: 'image',
+          url: 'cloud://image-a',
+          displayUrl: 'https://tmp.example.com/image-a.jpg'
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(db.records.rows[0].mediaList, [
+    {
+      mediaType: 'image',
+      url: 'cloud://image-a',
+      name: ''
+    }
+  ]);
+});
+
+test('record cloud function resolves media display urls for record detail', async () => {
+  const db = createMemoryDb([
+    {
+      _id: 'record-1',
+      content: 'detail image',
+      recordDate: '2026-07-05',
+      recordType: 'image',
+      mediaList: [
+        {
+          mediaType: 'image',
+          url: 'cloud://image-detail'
+        }
+      ],
+      createdAt: 1
+    }
+  ]);
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-a',
+    getTempFileURL: (fileList) => Promise.resolve({
+      fileList: fileList.map((fileID) => ({
+        fileID,
+        tempFileURL: 'https://tmp.example.com/image-detail.jpg'
+      }))
+    }),
+    now: () => 225
+  });
+
+  const detailResult = await handler({
+    action: 'getRecordDetail',
+    payload: {
+      id: 'record-1'
+    }
+  });
+
+  assert.equal(detailResult.success, true);
+  assert.equal(detailResult.data.record.mediaList[0].url, 'cloud://image-detail');
+  assert.equal(
+    detailResult.data.record.mediaList[0].displayUrl,
+    'https://tmp.example.com/image-detail.jpg'
+  );
 });
 
 test('record cloud function does not overwrite author name while editing records', async () => {

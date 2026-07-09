@@ -1,4 +1,4 @@
-function createRecordHandler({ db, getOpenId, now }) {
+function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
   const records = db.collection('records');
   const users = db.collection('users');
   const getCurrentTime = now || (() => Date.now());
@@ -11,9 +11,13 @@ function createRecordHandler({ db, getOpenId, now }) {
       if (action === 'getRecordList') {
         const response = await records.get();
         const list = filterRecords(response.data || [], payload).map(normalizeRecordForList);
+        const recordsWithDisplayUrls = await resolveRecordsMediaDisplayUrls(
+          sortRecords(list),
+          getTempFileURL
+        );
 
         return success({
-          list: sortRecords(list),
+          list: recordsWithDisplayUrls,
           total: list.length
         });
       }
@@ -22,7 +26,7 @@ function createRecordHandler({ db, getOpenId, now }) {
         const record = await getRecordById(records, payload.id);
 
         return success({
-          record
+          record: await resolveRecordMediaDisplayUrls(record, getTempFileURL)
         });
       }
 
@@ -243,6 +247,9 @@ exports.main = async (event) => {
 
   const handler = createRecordHandler({
     db: cloud.database(),
+    getTempFileURL: (fileList) => cloud.getTempFileURL({
+      fileList
+    }),
     getOpenId: () => {
       const context = cloud.getWXContext();
 
@@ -285,7 +292,7 @@ function normalizeRecordPayload(payload, options) {
     content: typeof payload.content === 'string' ? payload.content.trim() : '',
     recordDate: payload.recordDate || '',
     recordType: inferRecordType(mediaList),
-    mediaList
+    mediaList: normalizePersistedMediaList(mediaList)
   };
 
   if (options && options.authorName) {
@@ -320,6 +327,14 @@ function inferRecordType(mediaList) {
   return mediaList[0].mediaType === 'video' ? 'video' : 'image';
 }
 
+function normalizePersistedMediaList(mediaList) {
+  return mediaList.map((item) => ({
+    mediaType: item && item.mediaType ? item.mediaType : '',
+    url: item && item.url ? item.url : '',
+    name: item && item.name ? item.name : ''
+  }));
+}
+
 function filterRecords(records, payload) {
   return records.filter((record) => {
     if (payload.startDate && record.recordDate < payload.startDate) {
@@ -342,6 +357,83 @@ function normalizeRecordForList(record) {
       ? record.authorName.trim()
       : '我们'
   };
+}
+
+async function resolveRecordsMediaDisplayUrls(records, getTempFileURL) {
+  if (!Array.isArray(records) || !records.length) {
+    return [];
+  }
+
+  const urlMap = await buildTempFileUrlMap(
+    collectCloudFileIdsFromRecords(records),
+    getTempFileURL
+  );
+
+  return records.map((record) => ({
+    ...record,
+    mediaList: resolveMediaDisplayUrls(record.mediaList, urlMap)
+  }));
+}
+
+async function resolveRecordMediaDisplayUrls(record, getTempFileURL) {
+  if (!record) {
+    return record;
+  }
+
+  const urlMap = await buildTempFileUrlMap(
+    collectCloudFileIdsFromRecords([record]),
+    getTempFileURL
+  );
+
+  return {
+    ...record,
+    mediaList: resolveMediaDisplayUrls(record.mediaList, urlMap)
+  };
+}
+
+async function buildTempFileUrlMap(fileIDs, getTempFileURL) {
+  if (!fileIDs.length || typeof getTempFileURL !== 'function') {
+    return {};
+  }
+
+  const response = await getTempFileURL(fileIDs);
+  const fileList = response && Array.isArray(response.fileList)
+    ? response.fileList
+    : [];
+
+  return fileList.reduce((urlMap, file) => {
+    if (file && file.fileID && file.tempFileURL) {
+      urlMap[file.fileID] = file.tempFileURL;
+    }
+
+    return urlMap;
+  }, {});
+}
+
+function collectCloudFileIdsFromRecords(records) {
+  return Array.from(
+    new Set(
+      records
+        .flatMap((record) => (Array.isArray(record.mediaList) ? record.mediaList : []))
+        .map((item) => (item && typeof item.url === 'string' ? item.url : ''))
+        .filter(isCloudFileId)
+    )
+  );
+}
+
+function resolveMediaDisplayUrls(mediaList, urlMap) {
+  if (!Array.isArray(mediaList)) {
+    return [];
+  }
+
+  return mediaList.map((item) => {
+    const url = item && item.url ? item.url : '';
+
+    return {
+      ...item,
+      displayUrl: urlMap[url] || item.displayUrl || (isCloudFileId(url) ? '' : url)
+    };
+  });
 }
 
 function normalizeComments(comments) {
@@ -403,4 +495,8 @@ function compareDesc(left, right) {
   }
 
   return 0;
+}
+
+function isCloudFileId(url) {
+  return /^cloud:\/\//.test(url);
 }
