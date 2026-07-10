@@ -9,3 +9,4 @@ coverage/
 
 project.private.config.json
 
+.worktrees/
