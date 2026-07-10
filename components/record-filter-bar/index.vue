@@ -1,15 +1,18 @@
 <template>
   <view class="filter-bar">
-    <view class="filter-bar__month" @click="openMonthPicker">
-      <text class="filter-bar__label">记录月份</text>
-      <text class="filter-bar__value">{{ selectedMonth || '请选择月份' }}</text>
-    </view>
     <view
-      v-if="selectedMonth"
-      class="filter-bar__clear"
-      @click.stop="clearMonth"
+      class="filter-bar__trigger"
+      hover-class="filter-bar__trigger--pressed"
+      :hover-start-time="0"
+      :hover-stay-time="120"
+      @click="openMonthPicker"
+      @longpress.stop="clearMonth"
     >
-      清空
+      <u-icon
+        name="calendar"
+        size="28"
+        :color="selectedMonth ? '#d27d56' : '#7a675d'"
+      />
     </view>
     <u-datetime-picker
       :show="monthPickerVisible"
@@ -66,6 +69,10 @@ export default {
       this.closeMonthPicker()
     },
     clearMonth() {
+      if (!this.selectedMonth) {
+        return
+      }
+
       this.$emit('change', {
         shortcut: 'all',
         startDate: '',
@@ -96,42 +103,20 @@ export default {
 .filter-bar {
   display: flex;
   align-items: center;
-  gap: 14rpx;
-  margin-bottom: 24rpx;
 }
 
-.filter-bar__month {
-  flex: 1;
-  min-height: 82rpx;
-  padding: 12rpx 18rpx;
-  border: 2rpx solid $cl-color-border;
-  border-radius: 22rpx;
-  background: #fffaf4;
-  box-sizing: border-box;
+.filter-bar__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60rpx;
+  height: 60rpx;
+  border-radius: 50%;
+  transition: background-color 120ms ease, transform 120ms ease;
 }
 
-.filter-bar__label {
-  display: block;
-  margin-bottom: 6rpx;
-  font-size: 22rpx;
-  color: $cl-color-subtext;
-}
-
-.filter-bar__value {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 600;
-  color: $cl-color-text;
-}
-
-.filter-bar__clear {
-  flex-shrink: 0;
-  min-height: 82rpx;
-  padding: 0 22rpx;
-  border-radius: 22rpx;
-  background: rgba(210, 125, 86, 0.12);
-  color: $cl-color-primary;
-  font-size: 26rpx;
-  line-height: 82rpx;
+.filter-bar__trigger--pressed {
+  background: rgba(210, 125, 86, 0.14);
+  transform: scale(0.88);
 }
 </style>

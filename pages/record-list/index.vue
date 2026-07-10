@@ -4,9 +4,14 @@
       <u-icon name="account" size="30" color="#d27d56" />
     </view>
     <view class="page__header">
-      <space-header :space="spaceProfile" />
+      <space-header :space="spaceProfile">
+        <record-filter-bar
+          slot="action"
+          :value="filters"
+          @change="handleFilterChange"
+        />
+      </space-header>
     </view>
-    <record-filter-bar :value="filters" @change="handleFilterChange" />
 
     <view v-if="records.length" class="page__list">
       <record-card
@@ -366,10 +371,6 @@ export default {
   min-height: 100vh;
   padding: 32rpx 24rpx 120rpx;
   box-sizing: border-box;
-}
-
-.page__header {
-  margin-bottom: 18rpx;
 }
 
 .page__user-entry {

@@ -1,18 +1,30 @@
 <template>
   <view class="space-header">
-    <view>
-      <text class="space-header__title">{{ space.name || '我们的空间' }}</text>
-      <text class="space-header__meta">已记录 {{ space.totalRecords || 0 }} 条生活片段</text>
-    </view>
-    <view class="space-header__avatars">
-      <view
-        v-for="(member, index) in visibleMembers"
-        :key="index"
-        class="space-header__avatar"
-      >
-        <image v-if="member.avatarUrl" :src="member.avatarUrl" mode="aspectFill" />
-        <text v-else>{{ member.nickname ? member.nickname.slice(0, 1) : '爱' }}</text>
+    <view class="space-header__content">
+      <view class="space-header__title-row">
+        <text class="space-header__title">{{ space.name || '我们的空间' }}</text>
+        <view class="space-header__action">
+          <slot name="action">
+            <view class="space-header__avatars">
+              <view
+                v-for="(member, index) in visibleMembers"
+                :key="index"
+                class="space-header__avatar"
+              >
+                <image
+                  v-if="member.avatarUrl"
+                  :src="member.avatarUrl"
+                  mode="aspectFill"
+                />
+                <text v-else>{{
+                  member.nickname ? member.nickname.slice(0, 1) : '爱'
+                }}</text>
+              </view>
+            </view>
+          </slot>
+        </view>
       </view>
+      <text class="space-header__meta">已记录 {{ space.totalRecords || 0 }} 条生活片段</text>
     </view>
   </view>
 </template>
@@ -35,9 +47,6 @@ export default {
 
 <style lang="scss">
 .space-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
   padding: 24rpx 28rpx;
   margin-bottom: 24rpx;
   border-radius: 28rpx;
@@ -45,11 +54,29 @@ export default {
   box-shadow: 0 18rpx 40rpx rgba(142, 100, 74, 0.08);
 }
 
+.space-header__content {
+  min-width: 0;
+}
+
+.space-header__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
 .space-header__title {
   display: block;
+  min-width: 0;
   font-size: 40rpx;
   font-weight: 700;
   color: $cl-color-text;
+}
+
+.space-header__action {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
 }
 
 .space-header__meta {
@@ -61,7 +88,6 @@ export default {
 
 .space-header__avatars {
   display: flex;
-  margin-left: 24rpx;
 }
 
 .space-header__avatar {

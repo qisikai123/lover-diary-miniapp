@@ -5,7 +5,6 @@
         <text class="record-card__author">{{
           record.authorName || '我们'
         }}</text>
-        <text class="record-card__date">{{ record.recordDate || '' }}</text>
       </view>
       <view class="record-card__toolbar">
         <text v-if="record.isTop" class="record-card__top-tag">置顶</text>
@@ -70,6 +69,10 @@
       :mode="record.recordType"
     />
 
+    <text v-if="record.recordDate" class="record-card__date">{{
+      record.recordDate
+    }}</text>
+
     <view v-if="normalizedComments.length" class="record-card__comments">
       <view
         v-for="comment in normalizedComments"
@@ -85,7 +88,6 @@
         >
           <u-button
             class="record-card__comment-bubble-button"
-            size="mini"
             shape="circle"
             type="error"
             :hair-line="false"
@@ -296,12 +298,12 @@ export default {
   display: block;
   font-size: 30rpx;
   font-weight: 700;
-  color: $cl-color-text;
+  color: $cl-color-primary;
 }
 
 .record-card__date {
   display: block;
-  margin-top: 8rpx;
+  margin-top: 16rpx;
   font-size: 24rpx;
   color: $cl-color-subtext;
 }
@@ -384,6 +386,7 @@ export default {
   padding: 18rpx;
   border-radius: 22rpx;
   background: rgba(255, 255, 255, 0.58);
+  padding-left: 25rpx;
 }
 
 .record-card__comment + .record-card__comment {
@@ -505,6 +508,5 @@ export default {
 .record-card__comment-bubble-button {
   position: relative;
   z-index: 1;
-  width: 112rpx;
 }
 </style>
