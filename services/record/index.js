@@ -21,6 +21,43 @@ function getRecordDetail(payload) {
 }
 
 /**
+ * 通过云函数权限解析记录媒体的临时访问地址。
+ *
+ * @param {Array<string>} fileList
+ * @returns {Promise<{fileList: Array<Object>}>}
+ */
+function getMediaDisplayUrls(fileList) {
+  return callCloudFunction('record', 'getMediaDisplayUrls', {
+    fileList
+  }).then((response) => ({
+    fileList:
+      response && response.data && Array.isArray(response.data.fileList)
+        ? response.data.fileList
+        : []
+  }));
+}
+
+/**
+ * 查询记录内容安全审核状态。
+ *
+ * @param {{reviewId: string}} payload
+ * @returns {Promise<any>}
+ */
+function getContentSecurityReview(payload) {
+  return callCloudFunction('record', 'getContentSecurityReview', payload);
+}
+
+/**
+ * 图片上传后立即创建异步内容安全审核任务。
+ *
+ * @param {{media: Object}} payload
+ * @returns {Promise<any>}
+ */
+function createMediaReview(payload) {
+  return callCloudFunction('record', 'createMediaReview', payload);
+}
+
+/**
  * 保存记录。
  *
  * @param {Object} payload
@@ -71,7 +108,10 @@ function removeRecordComment(payload) {
 }
 
 module.exports = {
+  createMediaReview,
   createRecordComment,
+  getContentSecurityReview,
+  getMediaDisplayUrls,
   getRecordDetail,
   getRecordList,
   removeRecordComment,

@@ -94,11 +94,13 @@ import RecordCard from '@/components/record-card/index.vue'
 import RecordFilterBar from '@/components/record-filter-bar/index.vue'
 import {
   createRecordComment,
+  getMediaDisplayUrls,
   getRecordList,
   removeRecordComment,
   removeRecord,
   toggleRecordTop,
 } from '@/services/record/index'
+import { resolveRecordsMediaDisplayUrls } from '@/utils/cloud-media'
 import { buildRecordDateRange, sortRecords } from '@/utils/record'
 import { login, updateUserProfile } from '@/services/user/index'
 
@@ -258,8 +260,12 @@ export default {
         const response = await getRecordList(dateRange)
         const data = response && response.data ? response.data : {}
         const records = Array.isArray(data.list) ? data.list : []
+        const recordsWithMedia = await resolveRecordsMediaDisplayUrls(
+          records,
+          getMediaDisplayUrls
+        )
 
-        this.records = sortRecords(records)
+        this.records = sortRecords(recordsWithMedia)
         this.spaceProfile = {
           ...this.spaceProfile,
           totalRecords:

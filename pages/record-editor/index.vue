@@ -4,6 +4,7 @@
       <textarea
         v-model="form.content"
         class="page__textarea"
+        :disabled="Boolean(pendingReviewId)"
         maxlength="1000"
         placeholder="写下今天的生活日常"
       />
@@ -14,6 +15,7 @@
           shape="circle"
           plain
           :hair-line="false"
+          :disabled="Boolean(pendingReviewId)"
           @click="chooseImages"
         >
           选择图片
@@ -23,6 +25,7 @@
           shape="circle"
           plain
           :hair-line="false"
+          :disabled="Boolean(pendingReviewId)"
           @click="chooseVideo"
         >
           选择视频
@@ -32,13 +35,18 @@
       <record-media-grid
         :items="form.mediaList"
         :mode="form.recordType"
-        removable
+        :removable="!pendingReviewId"
         @remove="removeMedia"
       />
 
       <view class="page__date-row">
         <text class="page__date-label">当前日期</text>
-        <picker mode="date" :value="form.recordDate" @change="handleDateChange">
+        <picker
+          mode="date"
+          :value="form.recordDate"
+          :disabled="Boolean(pendingReviewId)"
+          @change="handleDateChange"
+        >
           <view class="page__date-value">{{
             form.recordDate || '请选择日期'
           }}</view>
@@ -51,9 +59,10 @@
       type="primary"
       shape="circle"
       :hair-line="false"
+      :loading="saving"
       @click="saveRecord"
     >
-      发布
+      {{ pendingReviewId ? '查询审核结果' : '发布' }}
     </u-button>
   </view>
 </template>
@@ -61,6 +70,9 @@
 <script>
 import RecordMediaGrid from '@/components/record-media-grid/index.vue'
 import {
+  createMediaReview,
+  getContentSecurityReview,
+  getMediaDisplayUrls,
   getRecordDetail,
   saveRecord as submitRecord,
 } from '@/services/record/index'
@@ -70,6 +82,7 @@ import {
   normalizeRecordDraft,
   validateRecordDraft,
 } from '@/utils/record'
+import { resolveRecordMediaDisplayUrls } from '@/utils/cloud-media'
 import { login } from '@/services/user/index'
 
 function getToday() {
@@ -87,6 +100,7 @@ export default {
   data() {
     return {
       recordId: '',
+      pendingReviewId: '',
       saving: false,
       currentUser: {
         nickname: '',
@@ -234,10 +248,17 @@ export default {
           return
         }
 
+        const recordWithMedia = await resolveRecordMediaDisplayUrls(
+          record,
+          getMediaDisplayUrls
+        )
+
         this.form = {
           ...createEmptyRecordDraft(),
-          ...record,
-          mediaList: Array.isArray(record.mediaList) ? record.mediaList : [],
+          ...recordWithMedia,
+          mediaList: Array.isArray(recordWithMedia.mediaList)
+            ? recordWithMedia.mediaList
+            : [],
         }
       } catch (error) {
         uni.showToast({
@@ -272,13 +293,24 @@ export default {
             cloudPath,
             filePath: file.path,
           })
-
-          uploadedMedia.push({
+          const media = {
             mediaType: file.mediaType,
             url: response.fileID,
             displayUrl: await this.resolveUploadedMediaUrl(response.fileID),
             name: file.name || cloudPath.split('/').pop(),
-          })
+          }
+
+          if (file.mediaType === 'image') {
+            const reviewResponse = await createMediaReview({
+              media,
+            })
+            const reviewData =
+              reviewResponse && reviewResponse.data ? reviewResponse.data : {}
+
+            media.reviewId = reviewData.reviewId || ''
+          }
+
+          uploadedMedia.push(media)
         }
 
         const mediaList = this.form.mediaList.concat(uploadedMedia)
@@ -328,15 +360,15 @@ export default {
         return
       }
 
+      if (this.pendingReviewId) {
+        await this.resumePendingReview()
+        return
+      }
+
       if (!this.currentUser.nickname) {
         await this.ensureCurrentUser()
       }
 
-      const draft = normalizeRecordDraft({
-        ...this.form,
-        _id: this.recordId,
-        authorName: this.currentUser.nickname || '微信用户',
-      })
       const validation = validateRecordDraft(this.form)
 
       if (!validation.valid) {
@@ -350,14 +382,16 @@ export default {
       this.saving = true
 
       try {
-        await submitRecord(draft)
-        uni.showToast({
-          title: '已保存',
-          icon: 'success',
-        })
-        setTimeout(() => {
-          uni.navigateBack()
-        }, 500)
+        const mediaReady = await this.ensureMediaReviewsReady()
+
+        if (!mediaReady) {
+          return
+        }
+
+        const draft = this.createSubmissionDraft()
+        const response = await submitRecord(draft)
+
+        await this.handleSaveResult(response)
       } catch (error) {
         uni.showToast({
           title: error.message || '保存失败',
@@ -366,6 +400,158 @@ export default {
       } finally {
         this.saving = false
       }
+    },
+    async ensureMediaReviewsReady() {
+      const reviewIds = Array.from(
+        new Set(
+          this.form.mediaList
+            .filter((item) => item.mediaType === 'image' && item.reviewId)
+            .map((item) => item.reviewId)
+        )
+      )
+
+      if (!reviewIds.length) {
+        return true
+      }
+
+      const responses = await Promise.all(
+        reviewIds.map((reviewId) =>
+          getContentSecurityReview({
+            reviewId,
+          })
+        )
+      )
+      const reviews = responses.map((response) =>
+        response && response.data ? response.data : {}
+      )
+
+      if (reviews.some((review) => review.status === 'rejected')) {
+        uni.showToast({
+          title: '所发布内容含违规信息',
+          icon: 'none',
+        })
+        return false
+      }
+
+      if (reviews.some((review) => review.status === 'failed')) {
+        throw new Error('内容安全检测失败，请稍后重试')
+      }
+
+      if (reviews.some((review) => review.status !== 'passed')) {
+        uni.showToast({
+          title: '图片正在审核，请稍后发布',
+          icon: 'none',
+        })
+        return false
+      }
+
+      return true
+    },
+    async resumePendingReview() {
+      this.saving = true
+
+      try {
+        await this.waitForContentReview(this.pendingReviewId)
+      } catch (error) {
+        uni.showToast({
+          title: error.message || '审核结果查询失败',
+          icon: 'none',
+        })
+      } finally {
+        this.saving = false
+      }
+    },
+    createSubmissionDraft() {
+      return normalizeRecordDraft({
+        ...this.form,
+        _id: this.recordId,
+        authorName: this.currentUser.nickname || '微信用户',
+      })
+    },
+    async handleSaveResult(response) {
+      const data = response && response.data ? response.data : {}
+
+      if (data.pendingReview && data.reviewId) {
+        this.pendingReviewId = data.reviewId
+        await this.waitForContentReview(data.reviewId)
+        return
+      }
+
+      this.finishSave()
+    },
+    async waitForContentReview(reviewId) {
+      let review = null
+
+      uni.showLoading({
+        title: '内容审核中',
+      })
+
+      try {
+        review = await this.pollContentReview(reviewId)
+      } finally {
+        uni.hideLoading()
+      }
+
+      this.handleContentReviewResult(review)
+    },
+    async pollContentReview(reviewId) {
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        const response = await getContentSecurityReview({
+          reviewId,
+        })
+        const review = response && response.data ? response.data : {}
+
+        if (['passed', 'rejected', 'failed'].includes(review.status)) {
+          return review
+        }
+
+        if (attempt < 14) {
+          await this.delay(2000)
+        }
+      }
+
+      return null
+    },
+    handleContentReviewResult(review) {
+      if (!review) {
+        uni.showToast({
+          title: '内容仍在审核，请稍后继续查询',
+          icon: 'none',
+        })
+        return
+      }
+
+      if (review.status === 'passed') {
+        this.pendingReviewId = ''
+        this.finishSave()
+        return
+      }
+
+      if (review.status === 'rejected') {
+        this.pendingReviewId = ''
+        uni.showToast({
+          title: '所发布内容含违规信息',
+          icon: 'none',
+        })
+        return
+      }
+
+      this.pendingReviewId = ''
+      throw new Error('内容安全检测失败，请稍后重试')
+    },
+    finishSave() {
+      uni.showToast({
+        title: '已保存',
+        icon: 'success',
+      })
+      setTimeout(() => {
+        uni.navigateBack()
+      }, 500)
+    },
+    delay(duration) {
+      return new Promise((resolve) => {
+        setTimeout(resolve, duration)
+      })
     },
   },
 }

@@ -1,6 +1,21 @@
-function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
+const CONTENT_VIOLATION_MESSAGE = '所发布内容含违规信息';
+const CONTENT_CHECK_FAILED_MESSAGE = '内容安全检测失败，请稍后重试';
+const MEDIA_REVIEW_PENDING_MESSAGE = '图片正在审核，请稍后发布';
+const MEDIA_URL_BATCH_SIZE = 50;
+
+function createRecordHandler({
+  db,
+  getOpenId,
+  now,
+  getTempFileURL,
+  downloadFile,
+  checkText,
+  checkMedia
+}) {
   const records = db.collection('records');
   const users = db.collection('users');
+  const contentSecurityTasks = db.collection('content_security_tasks');
+  const contentSecurityChecks = db.collection('content_security_checks');
   const getCurrentTime = now || (() => Date.now());
 
   return async function handleRecord(event) {
@@ -10,14 +25,12 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
 
       if (action === 'getRecordList') {
         const response = await records.get();
-        const list = filterRecords(response.data || [], payload).map(normalizeRecordForList);
-        const recordsWithDisplayUrls = await resolveRecordsMediaDisplayUrls(
-          sortRecords(list),
-          getTempFileURL
+        const list = sortRecords(
+          filterRecords(response.data || [], payload).map(normalizeRecordForList)
         );
 
         return success({
-          list: recordsWithDisplayUrls,
+          list,
           total: list.length
         });
       }
@@ -26,7 +39,74 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
         const record = await getRecordById(records, payload.id);
 
         return success({
-          record: await resolveRecordMediaDisplayUrls(record, getTempFileURL)
+          record
+        });
+      }
+
+      if (action === 'getMediaDisplayUrls') {
+        const response = await records.get();
+        const accessibleFileIds = new Set(
+          collectRecordMediaFileIds(response.data || [])
+        );
+        const fileIds = normalizeRequestedMediaFileIds(payload.fileList)
+          .filter((fileId) => accessibleFileIds.has(fileId));
+        const urlMap = await buildTempFileUrlMap(fileIds, getTempFileURL);
+
+        // 双方记录需要共同展示，临时地址由云函数生成，避免客户端存储权限屏蔽对方图片。
+        return success({
+          fileList: fileIds
+            .filter((fileId) => urlMap[fileId])
+            .map((fileId) => ({
+              fileID: fileId,
+              tempFileURL: urlMap[fileId]
+            }))
+        });
+      }
+
+      if (action === 'getContentSecurityReview') {
+        const reviewId = payload.reviewId || payload.id;
+        const task = await getRecordById(contentSecurityTasks, reviewId);
+
+        if (!task || task.openid !== getOpenId()) {
+          return failure('审核任务不存在');
+        }
+
+        return success({
+          reviewId,
+          status: task.status,
+          resultRecordId: task.resultRecordId || '',
+          message: getReviewMessage(task)
+        });
+      }
+
+      if (action === 'createMediaReview') {
+        const openid = getOpenId();
+        const media = normalizePersistedMediaList([payload.media])[0];
+        const mediaReview = await prepareMediaReview({
+          mediaList: media ? [media] : []
+        }, downloadFile);
+
+        if (mediaReview.failure) {
+          return mediaReview.failure;
+        }
+
+        if (mediaReview.imageMedia.length !== 1) {
+          return failure(CONTENT_CHECK_FAILED_MESSAGE);
+        }
+
+        return createPendingMediaReview({
+          checkMedia,
+          contentSecurityChecks,
+          contentSecurityTasks,
+          getCurrentTime,
+          getTempFileURL,
+          openid,
+          operation: 'reviewMedia',
+          payload: {
+            mediaList: mediaReview.payload.mediaList
+          },
+          imageMedia: mediaReview.imageMedia,
+          recordId: ''
         });
       }
 
@@ -48,6 +128,69 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
           createdAt,
           updatedAt: createdAt
         };
+        const contentFailure = await getTextContentFailure({
+          checkText,
+          content: record.content,
+          openid
+        });
+
+        if (contentFailure) {
+          return contentFailure;
+        }
+
+        const mediaReview = await prepareMediaReview(record, downloadFile);
+
+        if (mediaReview.failure) {
+          return mediaReview.failure;
+        }
+
+        if (mediaReview.imageMedia.length) {
+          const reviewDecision = await getUploadReviewDecision({
+            contentSecurityTasks,
+            imageMedia: mediaReview.imageMedia,
+            openid
+          });
+
+          if (reviewDecision === 'passed') {
+            const response = await records.add({
+              data: record
+            });
+
+            return success({
+              id: response._id,
+              record: {
+                ...record,
+                _id: response._id
+              }
+            });
+          }
+
+          if (reviewDecision === 'pending') {
+            return failure(MEDIA_REVIEW_PENDING_MESSAGE);
+          }
+
+          if (reviewDecision === 'rejected') {
+            return failure(CONTENT_VIOLATION_MESSAGE);
+          }
+
+          if (reviewDecision === 'failed') {
+            return failure(CONTENT_CHECK_FAILED_MESSAGE);
+          }
+
+          return createPendingMediaReview({
+            checkMedia,
+            contentSecurityChecks,
+            contentSecurityTasks,
+            getCurrentTime,
+            getTempFileURL,
+            openid,
+            operation: action,
+            payload: mediaReview.payload,
+            imageMedia: mediaReview.imageMedia,
+            recordId: ''
+          });
+        }
+
         const response = await records.add({
           data: record
         });
@@ -64,10 +207,84 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
       if (action === 'updateRecord') {
         const id = payload._id || payload.id;
         const updatedAt = getCurrentTime();
+        const openid = getOpenId();
+        const existingRecord = await getRecordById(records, id);
+
+        if (!existingRecord) {
+          return failure('记录不存在');
+        }
+
+        if (existingRecord.openid && existingRecord.openid !== openid) {
+          return failure('只能编辑自己的记录');
+        }
+
         const record = {
           ...normalizeRecordPayload(payload),
           updatedAt
         };
+        const contentFailure = await getTextContentFailure({
+          checkText,
+          content: record.content,
+          openid
+        });
+
+        if (contentFailure) {
+          return contentFailure;
+        }
+
+        const mediaReview = await prepareMediaReview(record, downloadFile);
+
+        if (mediaReview.failure) {
+          return mediaReview.failure;
+        }
+
+        if (mediaReview.imageMedia.length) {
+          const reviewDecision = await getUploadReviewDecision({
+            contentSecurityTasks,
+            imageMedia: mediaReview.imageMedia,
+            openid
+          });
+
+          if (reviewDecision === 'passed') {
+            await records.doc(id).update({
+              data: record
+            });
+
+            return success({
+              id,
+              record: {
+                ...existingRecord,
+                ...record,
+                _id: id
+              }
+            });
+          }
+
+          if (reviewDecision === 'pending') {
+            return failure(MEDIA_REVIEW_PENDING_MESSAGE);
+          }
+
+          if (reviewDecision === 'rejected') {
+            return failure(CONTENT_VIOLATION_MESSAGE);
+          }
+
+          if (reviewDecision === 'failed') {
+            return failure(CONTENT_CHECK_FAILED_MESSAGE);
+          }
+
+          return createPendingMediaReview({
+            checkMedia,
+            contentSecurityChecks,
+            contentSecurityTasks,
+            getCurrentTime,
+            getTempFileURL,
+            openid,
+            operation: action,
+            payload: mediaReview.payload,
+            imageMedia: mediaReview.imageMedia,
+            recordId: id
+          });
+        }
 
         await records.doc(id).update({
           data: record
@@ -89,21 +306,23 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
         const content = normalizeCommentContent(payload.content);
 
         if (!content) {
-          return {
-            success: false,
-            message: '请输入评论内容',
-            data: {}
-          };
+          return failure('请输入评论内容');
+        }
+
+        const contentFailure = await getTextContentFailure({
+          checkText,
+          content,
+          openid
+        });
+
+        if (contentFailure) {
+          return contentFailure;
         }
 
         const record = await getRecordById(records, id);
 
         if (!record) {
-          return {
-            success: false,
-            message: '记录不存在',
-            data: {}
-          };
+          return failure('记录不存在');
         }
 
         const existingComments = normalizeComments(record.comments);
@@ -142,30 +361,18 @@ function createRecordHandler({ db, getOpenId, now, getTempFileURL }) {
         const record = await getRecordById(records, id);
 
         if (!record) {
-          return {
-            success: false,
-            message: '记录不存在',
-            data: {}
-          };
+          return failure('记录不存在');
         }
 
         const comments = normalizeComments(record.comments);
         const targetComment = comments.find((comment) => comment.id === commentId);
 
         if (!targetComment) {
-          return {
-            success: false,
-            message: '评论不存在',
-            data: {}
-          };
+          return failure('评论不存在');
         }
 
         if (targetComment.openid !== openid) {
-          return {
-            success: false,
-            message: '只能删除自己的评论',
-            data: {}
-          };
+          return failure('只能删除自己的评论');
         }
 
         const nextComments = comments.filter((comment) => comment.id !== commentId);
@@ -250,6 +457,11 @@ exports.main = async (event) => {
     getTempFileURL: (fileList) => cloud.getTempFileURL({
       fileList
     }),
+    downloadFile: (fileID) => cloud.downloadFile({
+      fileID
+    }),
+    checkText: (params) => cloud.openapi.security.msgSecCheck(params),
+    checkMedia: (params) => cloud.openapi.security.mediaCheckAsync(params),
     getOpenId: () => {
       const context = cloud.getWXContext();
 
@@ -270,6 +482,14 @@ function success(data) {
   };
 }
 
+function failure(message) {
+  return {
+    success: false,
+    message,
+    data: {}
+  };
+}
+
 function isMissingRecordsCollectionError(error) {
   const message = error && (error.errMsg || error.message || String(error));
 
@@ -284,6 +504,389 @@ async function getRecordById(records, id) {
   const response = await records.doc(id).get();
 
   return response.data || null;
+}
+
+function getReviewMessage(task) {
+  if (task.status === 'rejected') {
+    return CONTENT_VIOLATION_MESSAGE;
+  }
+
+  if (task.status === 'failed') {
+    return CONTENT_CHECK_FAILED_MESSAGE;
+  }
+
+  return task.message || '';
+}
+
+async function getTextContentFailure({ checkText, content, openid }) {
+  if (!content) {
+    return null;
+  }
+
+  if (typeof checkText !== 'function') {
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  }
+
+  try {
+    const response = await checkText({
+      content,
+      version: 2,
+      scene: 4,
+      openid
+    });
+    const suggestion = getSecuritySuggestion(response);
+
+    if (suggestion === 'pass') {
+      return null;
+    }
+
+    if (suggestion === 'risky' || suggestion === 'review') {
+      return failure(CONTENT_VIOLATION_MESSAGE);
+    }
+
+    // 安全接口不可用或返回结构异常时必须拒绝发布，避免检测故障成为绕过通道。
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  } catch (error) {
+    if (isRiskContentError(error)) {
+      return failure(CONTENT_VIOLATION_MESSAGE);
+    }
+
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  }
+}
+
+async function prepareMediaReview(payload, downloadFile) {
+  if (!payload.mediaList.length) {
+    return {
+      payload,
+      imageMedia: []
+    };
+  }
+
+  const imageMedia = [];
+
+  for (const item of payload.mediaList) {
+    if (item.mediaType === 'image' || looksLikeImageFileId(item.url)) {
+      imageMedia.push({
+        ...item,
+        mediaType: 'image'
+      });
+      continue;
+    }
+
+    if (!isCloudFileId(item.url) || typeof downloadFile !== 'function') {
+      return {
+        failure: failure(CONTENT_CHECK_FAILED_MESSAGE),
+        imageMedia: []
+      };
+    }
+
+    try {
+      const response = await downloadFile(item.url);
+      const fileContent = response && response.fileContent
+        ? response.fileContent
+        : response;
+
+      // 客户端可伪造 mediaType，服务端需按文件头识别图片以防绕过审核。
+      if (isImageBuffer(fileContent)) {
+        imageMedia.push({
+          ...item,
+          mediaType: 'image'
+        });
+      }
+    } catch (error) {
+      return {
+        failure: failure(CONTENT_CHECK_FAILED_MESSAGE),
+        imageMedia: []
+      };
+    }
+  }
+
+  if (imageMedia.length && imageMedia.length !== payload.mediaList.length) {
+    return {
+      failure: failure('不能同时上传图片和视频'),
+      imageMedia: []
+    };
+  }
+
+  if (!imageMedia.length) {
+    return {
+      payload,
+      imageMedia: []
+    };
+  }
+
+  return {
+    payload: {
+      ...payload,
+      recordType: 'image',
+      mediaList: imageMedia
+    },
+    imageMedia
+  };
+}
+
+function looksLikeImageFileId(fileId) {
+  return /\/records\/images\//.test(fileId)
+    || /\.(?:jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(fileId);
+}
+
+function isImageBuffer(fileContent) {
+  if (!Buffer.isBuffer(fileContent) || fileContent.length < 4) {
+    return false;
+  }
+
+  if (
+    fileContent[0] === 0xff
+    && fileContent[1] === 0xd8
+    && fileContent[2] === 0xff
+  ) {
+    return true;
+  }
+
+  const signature = fileContent.toString('ascii', 0, 12);
+
+  return fileContent.subarray(0, 8).equals(
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  )
+    || signature.startsWith('GIF87a')
+    || signature.startsWith('GIF89a')
+    || (
+      signature.startsWith('RIFF')
+      && signature.slice(8, 12) === 'WEBP'
+    )
+    || signature.startsWith('BM')
+    || (
+      signature.slice(4, 8) === 'ftyp'
+      && [
+        'heic',
+        'heix',
+        'hevc',
+        'hevx',
+        'heim',
+        'heis',
+        'mif1',
+        'msf1',
+        'avif',
+        'avis'
+      ].includes(signature.slice(8, 12))
+    );
+}
+
+async function createPendingMediaReview({
+  checkMedia,
+  contentSecurityChecks,
+  contentSecurityTasks,
+  getCurrentTime,
+  getTempFileURL,
+  openid,
+  operation,
+  payload,
+  imageMedia,
+  recordId
+}) {
+  if (typeof checkMedia !== 'function' || typeof getTempFileURL !== 'function') {
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  }
+
+  const fileIds = imageMedia.map((item) => item.url);
+
+  if (fileIds.some((fileId) => !isCloudFileId(fileId))) {
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  }
+
+  let reviewId = '';
+
+  try {
+    const createdAt = getCurrentTime();
+    const [tempFileUrlMap, taskResponse] = await Promise.all([
+      buildTempFileUrlMap(fileIds, getTempFileURL),
+      contentSecurityTasks.add({
+        data: {
+          openid,
+          operation,
+          recordId,
+          payload,
+          status: 'pending',
+          checkCount: imageMedia.length,
+          resultRecordId: '',
+          message: '',
+          createdAt,
+          updatedAt: createdAt
+        }
+      })
+    ]);
+    reviewId = taskResponse._id;
+
+    if (fileIds.some((fileId) => !tempFileUrlMap[fileId])) {
+      throw new Error('temporary media URL is unavailable');
+    }
+
+    const mediaChecks = await Promise.all(imageMedia.map(async (item) => {
+      const mediaCheckParams = {
+        mediaUrl: tempFileUrlMap[item.url],
+        mediaType: 2,
+        version: 2,
+        scene: 4,
+        openid
+      };
+
+      const response = await checkMedia(mediaCheckParams);
+      const traceId = getMediaTraceId(response);
+
+      if (!traceId || isOpenApiFailure(response)) {
+        throw createMediaCheckError(response);
+      }
+
+      return {
+        traceId,
+        fileId: item.url
+      };
+    }));
+
+    await Promise.all(mediaChecks.map((check) => (
+      contentSecurityChecks.add({
+        data: {
+          _id: check.traceId,
+          reviewId,
+          fileId: check.fileId,
+          status: 'pending',
+          createdAt,
+          updatedAt: createdAt
+        }
+      })
+    )));
+
+    return success({
+      pendingReview: true,
+      reviewId
+    });
+  } catch (error) {
+    if (reviewId) {
+      await contentSecurityTasks.doc(reviewId).update({
+        data: {
+          status: 'failed',
+          message: CONTENT_CHECK_FAILED_MESSAGE,
+          updatedAt: getCurrentTime()
+        }
+      });
+    }
+
+    if (isRiskContentError(error)) {
+      return failure(CONTENT_VIOLATION_MESSAGE);
+    }
+
+    return failure(CONTENT_CHECK_FAILED_MESSAGE);
+  }
+}
+
+function createMediaCheckError(response) {
+  const error = new Error(
+    getErrorMessage(response) || 'media security check did not return a trace id'
+  );
+  error.errCode = getOpenApiErrorCode(response);
+
+  return error;
+}
+
+function getSecuritySuggestion(response) {
+  if (response && response.result && response.result.suggest) {
+    return response.result.suggest;
+  }
+
+  return response && response.suggest ? response.suggest : '';
+}
+
+function getMediaTraceId(response) {
+  if (!response) {
+    return '';
+  }
+
+  if (response.traceId || response.trace_id) {
+    return response.traceId || response.trace_id;
+  }
+
+  if (response.result) {
+    return response.result.traceId || response.result.trace_id || '';
+  }
+
+  return '';
+}
+
+function isOpenApiFailure(response) {
+  const errorCode = getOpenApiErrorCode(response);
+
+  return Boolean(errorCode);
+}
+
+function isRiskContentError(error) {
+  const errorCode = getOpenApiErrorCode(error);
+
+  return Number(errorCode) === 87014;
+}
+
+function getOpenApiErrorCode(source) {
+  return source && (source.errCode || source.errcode) || '';
+}
+
+function getErrorMessage(source) {
+  return source && (
+    source.errMsg
+    || source.errmsg
+    || source.message
+  ) || '';
+}
+
+async function getUploadReviewDecision({
+  contentSecurityTasks,
+  imageMedia,
+  openid
+}) {
+  if (imageMedia.some((item) => !item.reviewId)) {
+    return 'missing';
+  }
+
+  const tasks = await Promise.all(
+    imageMedia.map((item) => getRecordById(
+      contentSecurityTasks,
+      item.reviewId
+    ))
+  );
+
+  if (tasks.some((task, index) => !isUploadReviewForMedia(
+    task,
+    imageMedia[index],
+    openid
+  ))) {
+    return 'missing';
+  }
+
+  if (tasks.some((task) => task.status === 'rejected')) {
+    return 'rejected';
+  }
+
+  if (tasks.some((task) => task.status === 'failed')) {
+    return 'failed';
+  }
+
+  if (tasks.some((task) => task.status !== 'passed')) {
+    return 'pending';
+  }
+
+  return 'passed';
+}
+
+function isUploadReviewForMedia(task, media, openid) {
+  const mediaList = task && task.payload && Array.isArray(task.payload.mediaList)
+    ? task.payload.mediaList
+    : [];
+
+  return Boolean(
+    task
+    && task.openid === openid
+    && task.operation === 'reviewMedia'
+    && mediaList.some((item) => item && item.url === media.url)
+  );
 }
 
 function normalizeRecordPayload(payload, options) {
@@ -328,11 +931,19 @@ function inferRecordType(mediaList) {
 }
 
 function normalizePersistedMediaList(mediaList) {
-  return mediaList.map((item) => ({
-    mediaType: item && item.mediaType ? item.mediaType : '',
-    url: item && item.url ? item.url : '',
-    name: item && item.name ? item.name : ''
-  }));
+  return mediaList.map((item) => {
+    const media = {
+      mediaType: item && item.mediaType ? item.mediaType : '',
+      url: item && item.url ? item.url : '',
+      name: item && item.name ? item.name : ''
+    };
+
+    if (item && item.reviewId) {
+      media.reviewId = item.reviewId;
+    }
+
+    return media;
+  });
 }
 
 function filterRecords(records, payload) {
@@ -359,36 +970,22 @@ function normalizeRecordForList(record) {
   };
 }
 
-async function resolveRecordsMediaDisplayUrls(records, getTempFileURL) {
-  if (!Array.isArray(records) || !records.length) {
-    return [];
-  }
-
-  const urlMap = await buildTempFileUrlMap(
-    collectCloudFileIdsFromRecords(records),
-    getTempFileURL
-  );
-
-  return records.map((record) => ({
-    ...record,
-    mediaList: resolveMediaDisplayUrls(record.mediaList, urlMap)
-  }));
+function normalizeRequestedMediaFileIds(fileList) {
+  return Array.from(new Set(
+    (Array.isArray(fileList) ? fileList : [])
+      .filter((fileId) => typeof fileId === 'string' && isCloudFileId(fileId))
+  )).slice(0, MEDIA_URL_BATCH_SIZE);
 }
 
-async function resolveRecordMediaDisplayUrls(record, getTempFileURL) {
-  if (!record) {
-    return record;
-  }
-
-  const urlMap = await buildTempFileUrlMap(
-    collectCloudFileIdsFromRecords([record]),
-    getTempFileURL
-  );
-
-  return {
-    ...record,
-    mediaList: resolveMediaDisplayUrls(record.mediaList, urlMap)
-  };
+function collectRecordMediaFileIds(records) {
+  return Array.from(new Set(
+    records
+      .flatMap((record) => (
+        record && Array.isArray(record.mediaList) ? record.mediaList : []
+      ))
+      .map((media) => (media && media.url ? media.url : ''))
+      .filter(isCloudFileId)
+  ));
 }
 
 async function buildTempFileUrlMap(fileIDs, getTempFileURL) {
@@ -408,32 +1005,6 @@ async function buildTempFileUrlMap(fileIDs, getTempFileURL) {
 
     return urlMap;
   }, {});
-}
-
-function collectCloudFileIdsFromRecords(records) {
-  return Array.from(
-    new Set(
-      records
-        .flatMap((record) => (Array.isArray(record.mediaList) ? record.mediaList : []))
-        .map((item) => (item && typeof item.url === 'string' ? item.url : ''))
-        .filter(isCloudFileId)
-    )
-  );
-}
-
-function resolveMediaDisplayUrls(mediaList, urlMap) {
-  if (!Array.isArray(mediaList)) {
-    return [];
-  }
-
-  return mediaList.map((item) => {
-    const url = item && item.url ? item.url : '';
-
-    return {
-      ...item,
-      displayUrl: urlMap[url] || item.displayUrl || (isCloudFileId(url) ? '' : url)
-    };
-  });
 }
 
 function normalizeComments(comments) {

@@ -43,6 +43,17 @@
 - `message`：面向客户端的通用结果说明
 - `createdAt`、`updatedAt`：任务时间
 
+新增 `content_security_checks` 集合，用于按微信 `traceId` 定位单张图片的回调：
+
+- `_id`：微信返回的 `traceId`
+- `reviewId`：所属审核任务 ID
+- `fileId`：被检测的云存储文件 ID
+- `status`：`pending`、`passed` 或 `rejected`
+- `createdAt`、`updatedAt`：检测时间
+
+单图检测结果独立存储后，每个回调只更新自己的记录。最后一个通过的回调再通过任务
+状态抢占正式发布，避免多张图片并发回调时覆盖彼此结果或重复创建记录。
+
 待审图片不会提前写入 `records`。因此记录列表和详情继续只读取已发布数据，不需要
 额外依赖客户端过滤来隐藏违规内容。
 
@@ -53,11 +64,17 @@
 1. `createRecord` 标准化请求并取得当前用户 `openid`
 2. 正文非空时调用 `msgSecCheck`
 3. 无图片时，在文本通过后按现有流程直接创建记录
-4. 有图片时，为每张图片生成可供微信访问的临时 URL
-5. 使用社交日志发布场景调用 `mediaCheckAsync`
-6. 创建 `content_security_tasks` 待审任务并返回 `reviewId`
-7. 所有图片回调通过后，回调云函数创建正式记录
-8. 任一图片违规时，任务标记为拒绝，不创建正式记录
+4. 图片上传至云存储后立即调用云函数 `createMediaReview`
+5. 云函数通过 `security.mediaCheckAsync` 调用 `/wxa/media_check_async`
+6. 上传审核任务返回 `reviewId`，客户端随媒体草稿保存
+7. 发布时服务端校验 `reviewId`、文件 ID、用户及审核状态均匹配
+8. 已通过审核的图片直接复用结果，不重复调用微信接口
+9. 审核仍在进行时阻止发布并提示稍后重试
+10. 缺少有效审核凭证时，服务端仍按原流程送审，防止绕过客户端上传流程
+
+服务端不信任客户端传入的 `mediaType`。对非图片声明的云存储媒体先下载文件头，
+若识别为 JPEG、PNG、GIF、WebP、BMP、HEIC/HEIF 或 AVIF，仍强制进入图片审核。
+真实 MP4 不会被误判为图片；图片与视频混合请求由服务端拒绝。
 
 ### 4.2 编辑记录
 
@@ -76,12 +93,17 @@
 
 ## 5. 回调处理
 
-新增独立的内容安全回调云函数，由微信小程序后台的消息推送配置调用。部署时需要将
-微信的多媒体审核结果事件指向该回调入口。
+新增独立的内容安全回调云函数，并通过 CloudBase HTTP 访问暴露给微信消息推送。
+普通云函数消息推送目前不支持多媒体审核事件，不能仅在云开发控制台中添加云函数
+消息类型配置。
+
+HTTP 入口使用环境变量 `SECURITY_CALLBACK_TOKEN` 校验微信 `signature`。小程序后台
+消息推送配置必须使用相同 Token；首次 GET 验证通过后原样返回 `echostr`，POST 处理
+成功后返回 `success`。当前实现支持明文 JSON 或 XML 消息，不支持安全模式密文。
 
 回调处理规则：
 
-1. 根据 `traceId` 定位审核任务和图片
+1. 根据 `traceId` 定位单图检测记录及其审核任务
 2. 将微信结果归一化为 `passed` 或 `rejected`
 3. 已完成的 `traceId` 再次回调时直接返回成功
 4. 任一图片拒绝时，任务立即标记为 `rejected`
@@ -98,10 +120,18 @@
 - 无图片且检测通过：保持现有“已保存”流程
 - 包含图片：返回 `pendingReview: true` 和 `reviewId`
 
-编辑页收到待审结果后轮询审核状态：
+`getContentSecurityReview` 是项目内部审核任务查询接口，不是微信内容安全接口。
+微信实际检测使用 `security.mediaCheckAsync`，对应官方
+`POST /wxa/media_check_async`。官方只同步返回 `trace_id`，最终结果会在 30 分钟内
+推送到消息接收服务器。
+
+编辑页处理审核状态：
 
 - `passed`：提示“已保存”并返回列表
 - `rejected`：提示“所发布内容含违规信息”，保留当前编辑内容
+- `pending` 超时：停留编辑页并保留原 `reviewId`，用户再次点击时继续查询同一任务，
+  不重复提交内容安全检测
+- 新上传图片：上传成功后立即创建审核任务；点击发布时仅查询并校验已有任务
 - 超时仍为 `pending`：提示“内容审核中，请稍后查看”，停止持续轮询
 
 所有安全接口异常均按发布失败处理，不允许在检测不可用时降级为直接发布。
@@ -162,11 +192,21 @@
 
 ## 11. 部署要求
 
-1. 创建 `content_security_tasks` 云数据库集合
-2. 部署更新后的 `record` 云函数
-3. 部署内容安全回调云函数
-4. 在微信小程序后台配置多媒体内容安全结果消息推送
-5. 使用相册、相机、新增记录和编辑记录分别完成真机验证
-6. 使用明确违规测试素材验证仅提示“所发布内容含违规信息”
+1. 创建 `content_security_tasks` 和 `content_security_checks` 云数据库集合
+2. 禁止小程序客户端直接写入 `records`
+3. 禁止小程序客户端读取或写入两个内容安全集合
+4. 确认小程序账号可调用 `msgSecCheck` 与 `mediaCheckAsync`
+5. 部署更新后的 `record` 云函数，并将执行超时时间从默认 3 秒提高到至少 10 秒；
+   考虑最多 9 张图片并发审核，建议设置为 20 秒
+6. 部署 `security-callback` 云函数并开启 CloudBase HTTP 访问
+7. 为回调云函数设置 `SECURITY_CALLBACK_TOKEN` 环境变量
+8. 在微信小程序后台使用相同 Token 配置明文 JSON 或 XML 消息推送
+9. 完成后台 GET URL 验证，并确认非法签名及直接云函数调用无法推进审核
+10. 发布普通图片后检查 `security-callback` 日志：
+    - 没有 `Content security callback handled`：微信消息推送尚未到达回调 URL
+    - 出现 `Content security callback rejected`：检查 Token、明文模式及 URL 查询参数
+    - `ignored: true`：检查回调 `traceId` 是否存在于 `content_security_checks`
+11. 使用相册、相机、新增记录和编辑记录分别完成真机验证
+12. 使用明确违规测试素材验证仅提示“所发布内容含违规信息”
 
 消息推送未配置完成前，不应开放图片发布能力。

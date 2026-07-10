@@ -61,7 +61,11 @@ test('normalizeRecordDraft trims content and infers record type', () => {
       content: 'dinner',
       recordDate: '2026-07-06',
       recordType: 'image',
-      mediaList: [{ mediaType: 'image', url: 'cloud://image-a', name: '' }]
+      mediaList: [{
+        mediaType: 'image',
+        url: 'cloud://image-a',
+        name: ''
+      }]
     }
   );
 });
@@ -76,6 +80,22 @@ test('normalizeRecordDraft preserves author name for record creation', () => {
     }).authorName,
     '小明'
   );
+});
+
+test('normalizeRecordDraft preserves media review ids', () => {
+  const draft = normalizeRecordDraft({
+    content: 'reviewed image',
+    recordDate: '2026-07-10',
+    mediaList: [
+      {
+        mediaType: 'image',
+        url: 'cloud://image-reviewed',
+        reviewId: 'review-upload-passed'
+      }
+    ]
+  });
+
+  assert.equal(draft.mediaList[0].reviewId, 'review-upload-passed');
 });
 
 test('buildRecordDateRange returns current month bounds', () => {

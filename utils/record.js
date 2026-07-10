@@ -190,11 +190,19 @@ module.exports = {
 };
 
 function normalizePersistedMediaList(mediaList) {
-  return mediaList.map((item) => ({
-    mediaType: item && item.mediaType ? item.mediaType : '',
-    url: item && item.url ? item.url : '',
-    name: item && item.name ? item.name : ''
-  }));
+  return mediaList.map((item) => {
+    const media = {
+      mediaType: item && item.mediaType ? item.mediaType : '',
+      url: item && item.url ? item.url : '',
+      name: item && item.name ? item.name : ''
+    };
+
+    if (item && item.reviewId) {
+      media.reviewId = item.reviewId;
+    }
+
+    return media;
+  });
 }
 
 function compareDesc(left, right) {
