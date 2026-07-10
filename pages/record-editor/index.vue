@@ -15,7 +15,7 @@
           shape="circle"
           plain
           :hair-line="false"
-          :disabled="Boolean(pendingReviewId)"
+          :disabled="Boolean(pendingReviewId) || reviewingMedia"
           @click="chooseImages"
         >
           选择图片
@@ -25,7 +25,7 @@
           shape="circle"
           plain
           :hair-line="false"
-          :disabled="Boolean(pendingReviewId)"
+          :disabled="Boolean(pendingReviewId) || reviewingMedia"
           @click="chooseVideo"
         >
           选择视频
@@ -59,10 +59,17 @@
       type="primary"
       shape="circle"
       :hair-line="false"
-      :loading="saving"
+      :disabled="reviewingMedia"
+      :loading="saving || reviewingMedia"
       @click="saveRecord"
     >
-      {{ pendingReviewId ? '查询审核结果' : '发布' }}
+      {{
+        reviewingMedia
+          ? '图片审核中'
+          : pendingReviewId
+            ? '查询审核结果'
+            : '发布'
+      }}
     </u-button>
   </view>
 </template>
@@ -83,6 +90,7 @@ import {
   validateRecordDraft,
 } from '@/utils/record'
 import { resolveRecordMediaDisplayUrls } from '@/utils/cloud-media'
+import { reviewUploadedImage } from '@/utils/media-review'
 import { login } from '@/services/user/index'
 
 function getToday() {
@@ -101,6 +109,7 @@ export default {
     return {
       recordId: '',
       pendingReviewId: '',
+      reviewingMedia: false,
       saving: false,
       currentUser: {
         nickname: '',
@@ -280,53 +289,106 @@ export default {
         return
       }
 
-      uni.showLoading({
-        title: '上传中',
-      })
+      this.reviewingMedia = true
 
       try {
-        const uploadedMedia = []
+        const results = await Promise.all(
+          files.map((file) => this.uploadReviewedMedia(file))
+        )
 
-        for (const file of files) {
-          const cloudPath = this.buildCloudPath(file)
-          const response = await wx.cloud.uploadFile({
-            cloudPath,
-            filePath: file.path,
-          })
-          const media = {
-            mediaType: file.mediaType,
-            url: response.fileID,
-            displayUrl: await this.resolveUploadedMediaUrl(response.fileID),
-            name: file.name || cloudPath.split('/').pop(),
-          }
+        this.showMediaReviewFeedback(results)
+      } finally {
+        this.reviewingMedia = false
+      }
+    },
+    async uploadReviewedMedia(file) {
+      try {
+        const result = await this.uploadAndReviewMedia(file)
 
-          if (file.mediaType === 'image') {
-            const reviewResponse = await createMediaReview({
-              media,
-            })
-            const reviewData =
-              reviewResponse && reviewResponse.data ? reviewResponse.data : {}
-
-            media.reviewId = reviewData.reviewId || ''
-          }
-
-          uploadedMedia.push(media)
-        }
-
-        const mediaList = this.form.mediaList.concat(uploadedMedia)
-
-        this.form = {
-          ...this.form,
-          mediaList,
-          recordType: inferRecordType(mediaList),
-        }
+        this.appendApprovedMedia([result])
+        return result
       } catch (error) {
+        return {
+          status: 'failed',
+          media: null,
+          error,
+        }
+      }
+    },
+    async uploadAndReviewMedia(file) {
+      const media = await this.uploadMedia(file)
+
+      if (file.mediaType !== 'image') {
+        return {
+          status: 'passed',
+          media,
+        }
+      }
+
+      return reviewUploadedImage({
+        media,
+        createReview: createMediaReview,
+        getReview: getContentSecurityReview,
+        delay: this.delay,
+      })
+    },
+    async uploadMedia(file) {
+      const cloudPath = this.buildCloudPath(file)
+      const response = await wx.cloud.uploadFile({
+        cloudPath,
+        filePath: file.path,
+      })
+
+      return {
+        mediaType: file.mediaType,
+        url: response.fileID,
+        displayUrl: await this.resolveUploadedMediaUrl(response.fileID),
+        name: file.name || cloudPath.split('/').pop(),
+      }
+    },
+    appendApprovedMedia(results) {
+      const approvedMedia = results
+        .filter((result) => result.status === 'passed' && result.media)
+        .map((result) => result.media)
+
+      if (!approvedMedia.length) {
+        return
+      }
+
+      const mediaList = this.form.mediaList.concat(approvedMedia)
+
+      this.form = {
+        ...this.form,
+        mediaList,
+        recordType: inferRecordType(mediaList),
+      }
+    },
+    showMediaReviewFeedback(results) {
+      if (results.some((result) => result.status === 'rejected')) {
         uni.showToast({
-          title: error.message || '上传失败',
+          title: '所发布内容含违规信息',
           icon: 'none',
         })
-      } finally {
-        uni.hideLoading()
+        return
+      }
+
+      const failedResult = results.find((result) => result.status === 'failed')
+
+      if (failedResult) {
+        uni.showToast({
+          title:
+            (failedResult.error && failedResult.error.message) ||
+            '内容安全检测失败，请稍后重试',
+          icon: 'none',
+        })
+        return
+      }
+
+      if (results.some((result) => result.status === 'pending')) {
+        uni.showToast({
+          title: '图片仍在审核，请稍后重新上传',
+          icon: 'none',
+        })
       }
     },
     buildCloudPath(file) {
@@ -356,7 +418,7 @@ export default {
       return file && file.tempFileURL ? file.tempFileURL : ''
     },
     async saveRecord() {
-      if (this.saving) {
+      if (this.saving || this.reviewingMedia) {
         return
       }
 

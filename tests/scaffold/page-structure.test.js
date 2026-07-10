@@ -54,9 +54,12 @@ test('record editor keeps pending reviews on the current page', () => {
 test('record editor starts image review after cloud upload', () => {
   const serviceSource = readFile('services/record/index.js');
   const editorSource = readFile('pages/record-editor/index.vue');
+  const reviewSource = readFile('utils/media-review.js');
 
   assert.match(serviceSource, /createMediaReview/);
-  assert.match(editorSource, /await createMediaReview/);
+  assert.match(editorSource, /reviewUploadedImage/);
+  assert.match(reviewSource, /status === 'passed'/);
+  assert.match(reviewSource, /media: status === 'passed'/);
   assert.match(editorSource, /ensureMediaReviewsReady/);
   assert.match(editorSource, /图片正在审核，请稍后发布/);
 });
