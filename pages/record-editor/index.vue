@@ -90,6 +90,7 @@ import {
   validateRecordDraft,
 } from '@/utils/record'
 import { resolveRecordMediaDisplayUrls } from '@/utils/cloud-media'
+import { chooseRecordMedia } from '@/utils/media-picker'
 import { reviewUploadedImage } from '@/utils/media-review'
 import { login } from '@/services/user/index'
 
@@ -160,7 +161,7 @@ export default {
         birthDate: user.birthDate || '',
       }
     },
-    chooseImages() {
+    async chooseImages() {
       if (this.form.recordType === 'video') {
         uni.showToast({
           title: '已选择视频时不能再上传图片',
@@ -179,21 +180,19 @@ export default {
         return
       }
 
-      uni.chooseImage({
-        count: remainingCount,
-        sizeType: ['compressed'],
-        sourceType: ['album', 'camera'],
-        success: async (result) => {
-          await this.uploadSelectedMedia(
-            result.tempFilePaths.map((path) => ({
-              path,
-              mediaType: 'image',
-            }))
-          )
-        },
-      })
+      try {
+        const files = await chooseRecordMedia({
+          mediaType: 'image',
+          count: remainingCount,
+          uniApi: uni,
+        })
+
+        await this.uploadSelectedMedia(files)
+      } catch (error) {
+        this.showMediaChooseFailure(error)
+      }
     },
-    chooseVideo() {
+    async chooseVideo() {
       if (this.form.recordType === 'image') {
         uni.showToast({
           title: '已选择图片时不能再上传视频',
@@ -210,19 +209,21 @@ export default {
         return
       }
 
-      uni.chooseVideo({
-        sourceType: ['album', 'camera'],
-        compressed: true,
-        maxDuration: 60,
-        success: async (result) => {
-          await this.uploadSelectedMedia([
-            {
-              path: result.tempFilePath,
-              mediaType: 'video',
-              name: '视频',
-            },
-          ])
-        },
+      try {
+        const files = await chooseRecordMedia({
+          mediaType: 'video',
+          uniApi: uni,
+        })
+
+        await this.uploadSelectedMedia(files)
+      } catch (error) {
+        this.showMediaChooseFailure(error)
+      }
+    },
+    showMediaChooseFailure(error) {
+      uni.showToast({
+        title: error.message || '媒体选择失败，请重试',
+        icon: 'none',
       })
     },
     removeMedia(index) {
@@ -290,16 +291,24 @@ export default {
       }
 
       this.reviewingMedia = true
+      uni.showLoading({
+        title: files.some((file) => file.mediaType === 'image')
+          ? '图片审核中'
+          : '上传中',
+      })
+
+      let results = []
 
       try {
-        const results = await Promise.all(
+        results = await Promise.all(
           files.map((file) => this.uploadReviewedMedia(file))
         )
-
-        this.showMediaReviewFeedback(results)
       } finally {
         this.reviewingMedia = false
+        uni.hideLoading()
       }
+
+      this.showMediaReviewFeedback(results)
     },
     async uploadReviewedMedia(file) {
       try {
