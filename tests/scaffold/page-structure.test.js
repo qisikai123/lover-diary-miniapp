@@ -134,3 +134,44 @@ test('record list provides one keyboard-following comment composer', () => {
   assert.ok(dismissIndex > submitStart);
   assert.ok(dismissIndex < requestIndex);
 });
+
+test('record list shows an animated loading state before empty records', () => {
+  const listSource = readFile('pages/record-list/index.vue');
+
+  assert.match(listSource, /v-if="loading"/);
+  assert.match(listSource, /class="page__loading"/);
+  assert.match(listSource, /class="page__loading-spinner"/);
+  assert.match(listSource, /animation:\s*page-loading-rotate/);
+
+  const loadingIndex = listSource.indexOf('v-if="loading"');
+  const emptyIndex = listSource.indexOf('class="page__empty"');
+
+  assert.ok(loadingIndex > -1);
+  assert.ok(emptyIndex > loadingIndex);
+  assert.match(listSource, /v-else-if="records\.length"/);
+});
+
+test('record action menu closes when tapping outside the action bar', () => {
+  const listSource = readFile('pages/record-list/index.vue');
+  const cardSource = readFile('components/record-card/index.vue');
+
+  assert.match(listSource, /<view class="page" @click="closeRecordActions">/);
+  assert.match(
+    listSource,
+    /:action-menu-open="activeActionRecordId === item\._id"/
+  );
+  assert.match(listSource, /@toggle-actions="toggleRecordActions\(item\)"/);
+  assert.match(listSource, /@close-actions="closeRecordActions"/);
+  assert.match(listSource, /activeActionRecordId: ''/);
+  assert.match(listSource, /closeRecordActions\(\)\s*\{/);
+
+  assert.match(cardSource, /actionMenuOpen/);
+  assert.match(
+    cardSource,
+    /record-card__actions--visible': actionMenuOpen/
+  );
+  assert.match(cardSource, /@click\.stop="toggleActionMenu"/);
+  assert.match(cardSource, /@click\.stop/);
+  assert.match(cardSource, /\$emit\('toggle-actions'\)/);
+  assert.match(cardSource, /\$emit\('close-actions'\)/);
+});

@@ -9,12 +9,13 @@
       <view class="record-card__toolbar">
         <text v-if="record.isTop" class="record-card__top-tag">置顶</text>
         <view class="record-card__menu">
-          <view class="record-card__menu-trigger" @click="toggleActionMenu">
+          <view class="record-card__menu-trigger" @click.stop="toggleActionMenu">
             <u-icon name="more-dot-fill" size="18" color="#7a675d" />
           </view>
           <view
             class="record-card__actions"
-            :class="{ 'record-card__actions--visible': actionMenuVisible }"
+            :class="{ 'record-card__actions--visible': actionMenuOpen }"
+            @click.stop
           >
             <u-button
               class="record-card__action"
@@ -126,10 +127,13 @@ export default {
       type: String,
       default: '',
     },
+    actionMenuOpen: {
+      type: Boolean,
+      default: false,
+    },
   },
   data() {
     return {
-      actionMenuVisible: false,
       activeCommentMenuId: '',
     }
   },
@@ -147,10 +151,10 @@ export default {
   },
   methods: {
     toggleActionMenu() {
-      this.actionMenuVisible = !this.actionMenuVisible
+      this.$emit('toggle-actions')
     },
     closeActionMenu() {
-      this.actionMenuVisible = false
+      this.$emit('close-actions')
     },
     handleToggleTop() {
       this.closeActionMenu()

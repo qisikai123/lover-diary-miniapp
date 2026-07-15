@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" @click="closeRecordActions">
     <view class="page__user-entry" @click="openUserProfile">
       <u-icon name="account" size="30" color="#d27d56" />
     </view>
@@ -13,17 +13,25 @@
       </space-header>
     </view>
 
-    <view v-if="records.length" class="page__list">
+    <view v-if="loading" class="page__loading">
+      <view class="page__loading-spinner"></view>
+      <text class="page__loading-text">正在加载生活记录</text>
+    </view>
+
+    <view v-else-if="records.length" class="page__list">
       <record-card
         v-for="item in records"
         :key="item._id"
         :record="item"
         :current-user-openid="currentUser.openid"
+        :action-menu-open="activeActionRecordId === item._id"
         @open-comment="openCommentComposer"
         @remove-comment="handleRemoveComment"
         @edit="goEdit"
         @remove="handleRemove"
         @toggle-top="handleToggleTop"
+        @toggle-actions="toggleRecordActions(item)"
+        @close-actions="closeRecordActions"
       />
     </view>
 
@@ -172,6 +180,7 @@ export default {
       },
       records: [],
       loading: false,
+      activeActionRecordId: '',
       commentComposerVisible: false,
       commentTargetRecord: null,
       commentDraft: '',
@@ -342,6 +351,7 @@ export default {
         return
       }
 
+      this.closeRecordActions()
       this.loading = true
 
       try {
@@ -378,6 +388,20 @@ export default {
       uni.navigateTo({
         url: `/pages/record-editor/index?id=${record._id}`,
       })
+    },
+    toggleRecordActions(record) {
+      const recordId = record && record._id ? record._id : ''
+
+      if (!recordId) {
+        this.closeRecordActions()
+        return
+      }
+
+      this.activeActionRecordId =
+        this.activeActionRecordId === recordId ? '' : recordId
+    },
+    closeRecordActions() {
+      this.activeActionRecordId = ''
     },
     openCommentComposer(record) {
       this.commentTargetRecord = record
@@ -534,6 +558,35 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+}
+
+.page__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 180rpx 0;
+  color: $cl-color-subtext;
+}
+
+.page__loading-spinner {
+  width: 56rpx;
+  height: 56rpx;
+  border: 6rpx solid rgba(210, 125, 86, 0.18);
+  border-top-color: $cl-color-primary;
+  border-radius: 50%;
+  animation: page-loading-rotate 800ms linear infinite;
+}
+
+.page__loading-text {
+  margin-top: 20rpx;
+  font-size: 26rpx;
+}
+
+@keyframes page-loading-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .page__comment-dismiss {
