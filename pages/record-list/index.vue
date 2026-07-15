@@ -19,7 +19,7 @@
         :key="item._id"
         :record="item"
         :current-user-openid="currentUser.openid"
-        @comment="handleCreateComment"
+        @open-comment="openCommentComposer"
         @remove-comment="handleRemoveComment"
         @edit="goEdit"
         @remove="handleRemove"
@@ -30,6 +30,42 @@
     <view v-else class="page__empty">
       <text class="page__empty-title">还没有生活记录</text>
       <text class="page__empty-subtitle">发布第一条记录吧</text>
+    </view>
+
+    <view
+      v-if="commentComposerVisible"
+      class="page__comment-dismiss"
+      @click="closeCommentComposer"
+    />
+    <view
+      v-if="commentComposerVisible"
+      class="page__comment-bar"
+      :style="commentComposerStyle"
+    />
+    <textarea
+      v-if="commentComposerVisible"
+      v-model="commentDraft"
+      class="page__comment-input"
+      :style="commentInputStyle"
+      maxlength="300"
+      placeholder="写下你的评论"
+      :focus="commentInputFocused"
+      :fixed="true"
+      :auto-height="false"
+      :adjust-position="true"
+      confirm-type="send"
+      @focus="handleCommentInputFocus"
+      @confirm="submitComment"
+      @keyboardheightchange="handleCommentKeyboardHeightChange"
+    ></textarea>
+    <view
+      v-if="commentComposerVisible"
+      class="page__comment-submit"
+      :class="{ 'page__comment-submit--disabled': commentSubmitting }"
+      :style="commentSubmitStyle"
+      @click="submitComment"
+    >
+      发送
     </view>
 
     <view class="page__fab" @click="goCreate">+</view>
@@ -136,13 +172,66 @@ export default {
       },
       records: [],
       loading: false,
+      commentComposerVisible: false,
+      commentTargetRecord: null,
+      commentDraft: '',
+      commentInputFocused: false,
+      commentKeyboardHeight: 0,
+      commentSubmitting: false,
     }
+  },
+  computed: {
+    commentComposerStyle() {
+      return `bottom: ${this.commentKeyboardHeight}px`
+    },
+    commentInputStyle() {
+      return `bottom: ${this.commentKeyboardHeight + 8}px`
+    },
+    commentSubmitStyle() {
+      return `bottom: ${this.commentKeyboardHeight + 8}px`
+    },
+  },
+  onLoad() {
+    this.bindNativeKeyboardHeightChange()
   },
   onShow() {
     this.ensureCurrentUser()
     this.loadRecords()
   },
+  onUnload() {
+    this.unbindNativeKeyboardHeightChange()
+  },
   methods: {
+    bindNativeKeyboardHeightChange() {
+      if (
+        typeof wx === 'undefined' ||
+        typeof wx.onKeyboardHeightChange !== 'function'
+      ) {
+        return
+      }
+
+      this.nativeKeyboardHeightChangeHandler = (result) => {
+        this.updateCommentKeyboardHeight({ detail: result })
+        console.info('[comment-composer] native keyboard height', {
+          height: result && result.height,
+          composerVisible: this.commentComposerVisible,
+          systemInfo: uni.getSystemInfoSync(),
+        })
+      }
+      wx.onKeyboardHeightChange(this.nativeKeyboardHeightChangeHandler)
+    },
+    unbindNativeKeyboardHeightChange() {
+      if (
+        typeof wx === 'undefined' ||
+        typeof wx.offKeyboardHeightChange !== 'function' ||
+        !this.nativeKeyboardHeightChangeHandler
+      ) {
+        return
+      }
+
+      wx.offKeyboardHeightChange(this.nativeKeyboardHeightChangeHandler)
+      this.nativeKeyboardHeightChangeHandler = null
+    },
     async ensureCurrentUser() {
       try {
         const response = await login(this.getWechatProfile())
@@ -290,13 +379,66 @@ export default {
         url: `/pages/record-editor/index?id=${record._id}`,
       })
     },
-    async handleCreateComment({ record, content }) {
+    openCommentComposer(record) {
+      this.commentTargetRecord = record
+      this.commentDraft = ''
+      this.commentKeyboardHeight = 0
+      this.commentComposerVisible = true
+      this.commentInputFocused = false
+
+      this.$nextTick(() => {
+        this.commentInputFocused = true
+      })
+    },
+    dismissCommentComposer() {
+      this.commentComposerVisible = false
+      this.commentInputFocused = false
+      this.commentKeyboardHeight = 0
+      uni.hideKeyboard()
+    },
+    closeCommentComposer() {
+      this.dismissCommentComposer()
+      this.commentDraft = ''
+      this.commentTargetRecord = null
+    },
+    handleCommentInputFocus(event) {
+      this.updateCommentKeyboardHeight(event)
+    },
+    handleCommentKeyboardHeightChange(event) {
+      this.updateCommentKeyboardHeight(event)
+    },
+    updateCommentKeyboardHeight(event) {
+      const height = Number(event && event.detail && event.detail.height)
+
+      this.commentKeyboardHeight =
+        Number.isFinite(height) && height > 0 ? height : 0
+    },
+    async submitComment() {
+      const record = this.commentTargetRecord
+      const content = this.commentDraft.trim()
+
+      if (!content) {
+        uni.showToast({
+          title: '请输入评论内容',
+          icon: 'none',
+        })
+        return
+      }
+
+      if (!record || this.commentSubmitting) {
+        return
+      }
+
+      this.commentSubmitting = true
+      this.dismissCommentComposer()
+
       try {
         await createRecordComment({
           recordId: record._id,
           content,
         })
         await this.loadRecords()
+        this.closeCommentComposer()
         uni.showToast({
           title: '已评论',
           icon: 'success',
@@ -306,6 +448,8 @@ export default {
           title: error.message || '评论失败',
           icon: 'none',
         })
+      } finally {
+        this.commentSubmitting = false
       }
     },
     async handleRemoveComment({ record, comment }) {
@@ -390,6 +534,58 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+}
+
+.page__comment-dismiss {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+
+.page__comment-bar {
+  position: fixed;
+  right: 0;
+  left: 0;
+  z-index: 30;
+  height: 104rpx;
+  border-top: 2rpx solid $cl-color-border;
+  background: #fff;
+  box-shadow: 0 -10rpx 28rpx rgba(53, 38, 30, 0.08);
+}
+
+.page__comment-input {
+  position: fixed;
+  right: 168rpx;
+  left: 24rpx;
+  z-index: 31;
+  height: 72rpx;
+  padding: 14rpx 20rpx;
+  border: 2rpx solid $cl-color-border;
+  border-radius: 16rpx;
+  background: #fffaf6;
+  color: $cl-color-text;
+  font-size: 28rpx;
+  line-height: 40rpx;
+  box-sizing: border-box;
+}
+
+.page__comment-submit {
+  position: fixed;
+  right: 24rpx;
+  z-index: 32;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120rpx;
+  height: 72rpx;
+  border-radius: 16rpx;
+  background: $cl-color-primary;
+  color: #fff;
+  font-size: 28rpx;
+}
+
+.page__comment-submit--disabled {
+  opacity: 0.55;
 }
 
 .page__empty {

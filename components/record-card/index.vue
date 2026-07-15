@@ -107,36 +107,6 @@
       </view>
     </view>
 
-    <view v-if="commentEditorVisible" class="record-card__comment-editor">
-      <u-input
-        v-model="commentDraft"
-        maxlength="300"
-        auto-height
-        placeholder="写下你的评论"
-      />
-      <view class="record-card__comment-actions">
-        <u-button
-          class="record-card__comment-button"
-          size="mini"
-          shape="circle"
-          plain
-          :hair-line="false"
-          @click="closeCommentEditor"
-        >
-          取消
-        </u-button>
-        <u-button
-          class="record-card__comment-button"
-          size="mini"
-          type="primary"
-          shape="circle"
-          :hair-line="false"
-          @click="confirmComment"
-        >
-          确定
-        </u-button>
-      </view>
-    </view>
   </view>
 </template>
 
@@ -161,8 +131,6 @@ export default {
     return {
       actionMenuVisible: false,
       activeCommentMenuId: '',
-      commentDraft: '',
-      commentEditorVisible: false,
     }
   },
   computed: {
@@ -198,28 +166,7 @@ export default {
     },
     openCommentEditor() {
       this.closeActionMenu()
-      this.commentEditorVisible = true
-    },
-    closeCommentEditor() {
-      this.commentDraft = ''
-      this.commentEditorVisible = false
-    },
-    confirmComment() {
-      const content = this.commentDraft.trim()
-
-      if (!content) {
-        uni.showToast({
-          title: '请输入评论内容',
-          icon: 'none',
-        })
-        return
-      }
-
-      this.$emit('comment', {
-        record: this.record,
-        content,
-      })
-      this.closeCommentEditor()
+      this.$emit('open-comment', this.record)
     },
     canRemoveComment(comment) {
       return Boolean(
@@ -422,62 +369,6 @@ export default {
   white-space: pre-wrap;
 }
 
-.record-card__comment-editor {
-  max-height: 0;
-  margin-top: 0;
-  opacity: 0;
-  overflow: hidden;
-  transform: translateY(-10rpx);
-  transition: max-height 220ms ease, margin-top 220ms ease, opacity 180ms ease,
-    transform 180ms ease;
-}
-
-.record-card__comment-editor--visible {
-  max-height: 280rpx;
-  margin-top: 22rpx;
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.record-card__comment-input {
-  width: 100%;
-  min-height: 128rpx;
-  padding: 20rpx;
-  border: 2rpx solid $cl-color-border;
-  border-radius: 22rpx;
-  background: #fff;
-  color: $cl-color-text;
-  font-size: 26rpx;
-  line-height: 1.5;
-  box-sizing: border-box;
-}
-
-.record-card__comment-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 18rpx;
-  margin-top: 16rpx;
-}
-
-.record-card__comment-button {
-  width: 100%;
-}
-
-.record-card__comment-editor {
-  max-height: none;
-  margin-top: 22rpx;
-  opacity: 1;
-  overflow: visible;
-  transform: none;
-  transition: none;
-}
-
-.record-card__comment-editor--visible {
-  max-height: none;
-  opacity: 1;
-  overflow: visible;
-  transform: none;
-}
 .record-card__comment {
   position: relative;
 }

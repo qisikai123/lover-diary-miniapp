@@ -79,3 +79,58 @@ test('record pages resolve shared media through the record cloud function', () =
     /resolveRecordMediaDisplayUrls\(\s*record,\s*getMediaDisplayUrls\s*\)/
   );
 });
+
+test('record list provides one keyboard-following comment composer', () => {
+  const cardSource = readFile('components/record-card/index.vue');
+  const listSource = readFile('pages/record-list/index.vue');
+
+  assert.match(cardSource, /\$emit\('open-comment', this\.record\)/);
+  assert.match(listSource, /@open-comment="openCommentComposer"/);
+  assert.match(listSource, /v-if="commentComposerVisible"/);
+  assert.match(listSource, /@click="closeCommentComposer"/);
+  assert.match(listSource, /:style="commentComposerStyle"/);
+  assert.match(listSource, /class="page__comment-bar"/);
+  assert.match(listSource, /:style="commentInputStyle"/);
+  assert.match(listSource, /:style="commentSubmitStyle"/);
+  assert.match(
+    listSource,
+    /commentComposerStyle\(\)\s*\{\s*return `bottom: \$\{this\.commentKeyboardHeight\}px`/
+  );
+  assert.match(
+    listSource,
+    /commentInputStyle\(\)\s*\{\s*return `bottom: \$\{this\.commentKeyboardHeight \+ 8\}px`/
+  );
+  assert.match(
+    listSource,
+    /commentSubmitStyle\(\)\s*\{\s*return `bottom: \$\{this\.commentKeyboardHeight \+ 8\}px`/
+  );
+  assert.match(listSource, /<textarea/);
+  assert.match(listSource, /:fixed="true"/);
+  assert.match(listSource, /:adjust-position="true"/);
+  assert.match(listSource, /@focus="handleCommentInputFocus"/);
+  assert.match(listSource, /confirm-type="send"/);
+  assert.match(listSource, /@confirm="submitComment"/);
+  assert.match(listSource, /@click="submitComment"/);
+  assert.match(
+    listSource,
+    /@keyboardheightchange="handleCommentKeyboardHeightChange"/
+  );
+  assert.match(
+    listSource,
+    /event\.detail && event\.detail\.height/
+  );
+  assert.match(listSource, /wx\.onKeyboardHeightChange/);
+
+  const submitStart = listSource.indexOf('this.commentSubmitting = true');
+  const dismissIndex = listSource.indexOf(
+    'this.dismissCommentComposer()',
+    submitStart
+  );
+  const requestIndex = listSource.indexOf(
+    'await createRecordComment',
+    submitStart
+  );
+
+  assert.ok(dismissIndex > submitStart);
+  assert.ok(dismissIndex < requestIndex);
+});
