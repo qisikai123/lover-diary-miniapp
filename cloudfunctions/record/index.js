@@ -1,3 +1,8 @@
+const {
+  ALLOWED_USER_OPENIDS,
+  NO_PERMISSION_MESSAGE,
+  isAllowedOpenId
+} = require('../../utils/access-control');
 const CONTENT_VIOLATION_MESSAGE = '所发布内容含违规信息';
 const CONTENT_CHECK_FAILED_MESSAGE = '内容安全检测失败，请稍后重试';
 const MEDIA_REVIEW_PENDING_MESSAGE = '图片正在审核，请稍后发布';
@@ -10,18 +15,25 @@ function createRecordHandler({
   getTempFileURL,
   downloadFile,
   checkText,
-  checkMedia
+  checkMedia,
+  allowedOpenIds
 }) {
   const records = db.collection('records');
   const users = db.collection('users');
   const contentSecurityTasks = db.collection('content_security_tasks');
   const contentSecurityChecks = db.collection('content_security_checks');
   const getCurrentTime = now || (() => Date.now());
+  const allowedUserOpenIds = Array.isArray(allowedOpenIds) ? allowedOpenIds : [];
 
   return async function handleRecord(event) {
     try {
       const action = event.action || 'getRecordList';
       const payload = event.payload || {};
+      const openid = getOpenId();
+
+      if (!isAllowedOpenId(openid, allowedUserOpenIds)) {
+        return failure(NO_PERMISSION_MESSAGE);
+      }
 
       if (action === 'getRecordList') {
         const response = await records.get();
@@ -467,7 +479,8 @@ exports.main = async (event) => {
 
       return context.OPENID;
     },
-    now: () => Date.now()
+    now: () => Date.now(),
+    allowedOpenIds: ALLOWED_USER_OPENIDS
   });
 
   return handler(event || {});

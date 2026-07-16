@@ -147,3 +147,24 @@ test('login cloud function keeps existing profile fields during silent login', a
   assert.equal(result.data.user.birthDate, '2026-07-07');
   assert.equal(db.users.rows[0].updatedAt, 300);
 });
+
+test('login cloud function rejects openids outside configured entry whitelist', async () => {
+  const db = createMemoryDb();
+  const handler = createLoginHandler({
+    db,
+    getOpenId: () => 'openid-blocked',
+    now: () => 400,
+    allowedOpenIds: ['openid-allowed']
+  });
+
+  const result = await handler({
+    action: 'login',
+    payload: {
+      nickname: '未授权用户'
+    }
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.message, '无权限');
+  assert.equal(db.users.rows.length, 0);
+});

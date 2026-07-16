@@ -1,6 +1,13 @@
-function createLoginHandler({ db, getOpenId, now }) {
+const {
+  ALLOWED_USER_OPENIDS,
+  NO_PERMISSION_MESSAGE,
+  isAllowedOpenId
+} = require('../../utils/access-control');
+
+function createLoginHandler({ db, getOpenId, now, allowedOpenIds }) {
   const users = db.collection('users');
   const getCurrentTime = now || (() => Date.now());
+  const allowedUserOpenIds = Array.isArray(allowedOpenIds) ? allowedOpenIds : [];
 
   return async function handleLogin(event) {
     const action = event.action || 'login';
@@ -9,6 +16,11 @@ function createLoginHandler({ db, getOpenId, now }) {
 
     if (action === 'login') {
       const existingUser = await findUserByOpenId(users, openid);
+
+      if (!isAllowedOpenId(openid, allowedUserOpenIds)) {
+        return failure(NO_PERMISSION_MESSAGE);
+      }
+
       const user = existingUser
         ? await refreshUserOnLogin(users, existingUser, payload, getCurrentTime())
         : await createUser(users, openid, payload, getCurrentTime());
@@ -20,6 +32,11 @@ function createLoginHandler({ db, getOpenId, now }) {
 
     if (action === 'updateUserProfile') {
       const existingUser = await findUserByOpenId(users, openid);
+
+      if (!isAllowedOpenId(openid, allowedUserOpenIds)) {
+        return failure(NO_PERMISSION_MESSAGE);
+      }
+
       const user = existingUser
         ? await updateUserProfile(users, existingUser, payload, getCurrentTime())
         : await createUser(users, openid, payload, getCurrentTime());
@@ -51,7 +68,8 @@ exports.main = async (event) => {
 
       return context.OPENID;
     },
-    now: () => Date.now()
+    now: () => Date.now(),
+    allowedOpenIds: ALLOWED_USER_OPENIDS
   });
 
   return handler(event || {});
@@ -63,6 +81,14 @@ function success(data) {
   return {
     success: true,
     data
+  };
+}
+
+function failure(message) {
+  return {
+    success: false,
+    message,
+    data: {}
   };
 }
 

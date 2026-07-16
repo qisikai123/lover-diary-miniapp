@@ -1,9 +1,13 @@
 <template>
   <view class="page" @click="closeRecordActions">
-    <view class="page__user-entry" @click="openUserProfile">
+    <view
+      v-if="!accessDenied"
+      class="page__user-entry"
+      @click="openUserProfile"
+    >
       <u-icon name="account" size="30" color="#d27d56" />
     </view>
-    <view class="page__header">
+    <view v-if="!accessDenied" class="page__header">
       <space-header :space="spaceProfile">
         <record-filter-bar
           slot="action"
@@ -13,12 +17,17 @@
       </space-header>
     </view>
 
-    <view v-if="loading" class="page__loading">
+    <view v-if="accessDenied" class="page__access-denied">
+      <text class="page__access-title">无权限</text>
+      <text class="page__access-subtitle">当前账号无权限进入</text>
+    </view>
+
+    <view v-if="loading" v-show="!accessDenied" class="page__loading">
       <view class="page__loading-spinner"></view>
       <text class="page__loading-text">正在加载生活记录</text>
     </view>
 
-    <view v-else-if="records.length" class="page__list">
+    <view v-else-if="records.length" v-show="!accessDenied" class="page__list">
       <record-card
         v-for="item in records"
         :key="item._id"
@@ -35,7 +44,7 @@
       />
     </view>
 
-    <view v-else class="page__empty">
+    <view v-else-if="!accessDenied" class="page__empty">
       <text class="page__empty-title">还没有生活记录</text>
       <text class="page__empty-subtitle">发布第一条记录吧</text>
     </view>
@@ -76,7 +85,7 @@
       发送
     </view>
 
-    <view class="page__fab" @click="goCreate">+</view>
+    <view v-if="!accessDenied" class="page__fab" @click="goCreate">+</view>
 
     <view v-if="profileVisible" class="profile-modal">
       <view class="profile-modal__mask" @click="closeUserProfile"></view>
@@ -146,6 +155,10 @@ import {
 } from '@/services/record/index'
 import { resolveRecordsMediaDisplayUrls } from '@/utils/cloud-media'
 import { buildRecordDateRange, sortRecords } from '@/utils/record'
+import {
+  isAccessDeniedError,
+  showNoPermissionModal,
+} from '@/utils/access-control'
 import { login, updateUserProfile } from '@/services/user/index'
 
 export default {
@@ -167,6 +180,8 @@ export default {
         avatarUrl: '',
         birthDate: '',
       },
+      accessDenied: false,
+      accessDeniedModalVisible: false,
       profileVisible: false,
       profileForm: {
         nickname: '',
@@ -203,9 +218,12 @@ export default {
   onLoad() {
     this.bindNativeKeyboardHeightChange()
   },
-  onShow() {
-    this.ensureCurrentUser()
-    this.loadRecords()
+  async onShow() {
+    const authenticated = await this.ensureCurrentUser()
+
+    if (authenticated) {
+      this.loadRecords()
+    }
   },
   onUnload() {
     this.unbindNativeKeyboardHeightChange()
@@ -248,13 +266,53 @@ export default {
 
         if (user) {
           this.setCurrentUser(user)
+          this.accessDenied = false
+          return true
         }
       } catch (error) {
+        if (isAccessDeniedError(error)) {
+          this.handleAccessDenied()
+          return false
+        }
+
         uni.showToast({
           title: error.message || '登录失败',
           icon: 'none',
         })
       }
+
+      return false
+    },
+    handleAccessDenied() {
+      this.accessDenied = true
+      this.records = []
+      this.currentUser = {
+        openid: '',
+        nickname: '',
+        avatarUrl: '',
+        birthDate: '',
+      }
+      this.spaceProfile = {
+        ...this.spaceProfile,
+        totalRecords: 0,
+      }
+      this.profileVisible = false
+      this.commentComposerVisible = false
+      this.closeRecordActions()
+      uni.removeStorageSync('currentUser')
+      this.showAccessDeniedModal()
+    },
+    showAccessDeniedModal() {
+      if (this.accessDeniedModalVisible) {
+        return
+      }
+
+      this.accessDeniedModalVisible = true
+      showNoPermissionModal(uni, {
+        complete: () => {
+          this.accessDeniedModalVisible = false
+        },
+      })
     },
     getWechatProfile() {
       const storedUser = uni.getStorageSync('currentUser') || {}
@@ -306,6 +364,11 @@ export default {
       }
     },
     async saveUserProfile() {
+      if (this.accessDenied) {
+        this.showAccessDeniedModal()
+        return
+      }
+
       const nickname = this.profileForm.nickname.trim()
 
       if (!nickname) {
@@ -340,6 +403,11 @@ export default {
       }
     },
     handleFilterChange(nextFilters) {
+      if (this.accessDenied) {
+        this.showAccessDeniedModal()
+        return
+      }
+
       this.filters = {
         ...this.filters,
         ...nextFilters,
@@ -347,7 +415,7 @@ export default {
       this.loadRecords()
     },
     async loadRecords() {
-      if (this.loading) {
+      if (this.accessDenied || this.loading) {
         return
       }
 
@@ -380,6 +448,11 @@ export default {
       }
     },
     goCreate() {
+      if (this.accessDenied) {
+        this.showAccessDeniedModal()
+        return
+      }
+
       uni.navigateTo({
         url: '/pages/record-editor/index',
       })
@@ -641,6 +714,7 @@ export default {
   opacity: 0.55;
 }
 
+.page__access-denied,
 .page__empty {
   display: flex;
   flex-direction: column;
@@ -650,11 +724,13 @@ export default {
   color: $cl-color-subtext;
 }
 
+.page__access-title,
 .page__empty-title {
   font-size: 34rpx;
   font-weight: 600;
 }
 
+.page__access-subtitle,
 .page__empty-subtitle {
   margin-top: 16rpx;
   font-size: 26rpx;

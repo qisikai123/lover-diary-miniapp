@@ -41,6 +41,23 @@ function createRecordHandler(options) {
   });
 }
 
+test('record cloud function rejects openids outside configured entry whitelist', async () => {
+  const db = createMemoryDb();
+  const handler = createRecordHandler({
+    db,
+    getOpenId: () => 'openid-blocked',
+    allowedOpenIds: ['openid-allowed']
+  });
+
+  const result = await handler({
+    action: 'getRecordList',
+    payload: {}
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.message, '无权限');
+});
+
 test('record cloud function creates and lists records in product order', async () => {
   const db = createMemoryDb();
   const handler = createRecordHandler({

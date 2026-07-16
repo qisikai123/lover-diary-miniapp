@@ -3,7 +3,7 @@ const { callCloudFunction } = require('../cloud/index');
 /**
  * 登录并返回当前微信用户资料。
  *
- * 登录阶段只负责识别和保存用户信息，权限校验会在后续空间/成员功能中收口。
+ * 登录云函数会同时完成入口白名单校验，避免页面层自行判断 openid。
  *
  * @param {{nickname?: string, nickName?: string, avatarUrl?: string, birthDate?: string}} payload
  * @returns {Promise<any>}

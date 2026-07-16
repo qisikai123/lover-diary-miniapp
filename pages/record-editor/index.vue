@@ -1,6 +1,11 @@
 <template>
   <view class="page">
-    <view class="page__card">
+    <view v-if="accessDenied" class="page__access-denied">
+      <text class="page__access-title">无权限</text>
+      <text class="page__access-subtitle">当前账号无权限进入</text>
+    </view>
+
+    <view v-else class="page__card">
       <textarea
         v-model="form.content"
         class="page__textarea"
@@ -55,6 +60,7 @@
     </view>
 
     <u-button
+      v-if="!accessDenied"
       class="page__submit"
       type="primary"
       shape="circle"
@@ -92,6 +98,10 @@ import {
 import { resolveRecordMediaDisplayUrls } from '@/utils/cloud-media'
 import { chooseRecordMedia } from '@/utils/media-picker'
 import { reviewUploadedImage } from '@/utils/media-review'
+import {
+  isAccessDeniedError,
+  showNoPermissionModal,
+} from '@/utils/access-control'
 import { login } from '@/services/user/index'
 
 function getToday() {
@@ -112,6 +122,8 @@ export default {
       pendingReviewId: '',
       reviewingMedia: false,
       saving: false,
+      accessDenied: false,
+      accessDeniedModalVisible: false,
       currentUser: {
         nickname: '',
         avatarUrl: '',
@@ -123,9 +135,13 @@ export default {
       },
     }
   },
-  onLoad(options) {
+  async onLoad(options) {
     this.recordId = options && options.id ? options.id : ''
-    this.ensureCurrentUser()
+    const authenticated = await this.ensureCurrentUser()
+
+    if (!authenticated) {
+      return
+    }
 
     if (this.recordId) {
       this.loadRecordDetail()
@@ -143,14 +159,48 @@ export default {
             avatarUrl: user.avatarUrl || '',
             birthDate: user.birthDate || '',
           }
+          this.accessDenied = false
           uni.setStorageSync('currentUser', this.currentUser)
+          return true
         }
       } catch (error) {
+        if (isAccessDeniedError(error)) {
+          this.handleAccessDenied()
+          return false
+        }
+
         uni.showToast({
           title: error.message || '登录失败',
           icon: 'none',
         })
       }
+
+      return false
+    },
+    handleAccessDenied() {
+      this.accessDenied = true
+      this.saving = false
+      this.reviewingMedia = false
+      this.pendingReviewId = ''
+      this.currentUser = {
+        nickname: '',
+        avatarUrl: '',
+        birthDate: '',
+      }
+      uni.removeStorageSync('currentUser')
+      this.showAccessDeniedModal()
+    },
+    showAccessDeniedModal() {
+      if (this.accessDeniedModalVisible) {
+        return
+      }
+
+      this.accessDeniedModalVisible = true
+      showNoPermissionModal(uni, {
+        complete: () => {
+          this.accessDeniedModalVisible = false
+        },
+      })
     },
     getStoredUserProfile() {
       const user = uni.getStorageSync('currentUser') || {}
@@ -427,6 +477,11 @@ export default {
       return file && file.tempFileURL ? file.tempFileURL : ''
     },
     async saveRecord() {
+      if (this.accessDenied) {
+        this.showAccessDeniedModal()
+        return
+      }
+
       if (this.saving || this.reviewingMedia) {
         return
       }
@@ -640,6 +695,25 @@ export default {
   border: 2rpx solid $cl-color-border;
   border-radius: 28rpx;
   background: $cl-color-card;
+}
+
+.page__access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 180rpx 0;
+  color: $cl-color-subtext;
+}
+
+.page__access-title {
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.page__access-subtitle {
+  margin-top: 16rpx;
+  font-size: 26rpx;
 }
 
 .page__textarea {
